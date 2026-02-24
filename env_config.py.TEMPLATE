@@ -54,6 +54,6 @@ ALLOW_DEV_ORIGINS = False
 #--------
 # External Handlers Configuration
 # Comma-separated list of extensions that have external handlers
-EXTERNAL_HANDLERS = 'arbitium'
-EXTERNAL_HANDLERS_USE_DEV_DOCKER = ''
+EXTERNAL_HANDLERS = 'exhq'
+EXTERNAL_HANDLERS_USE_DEV_DOCKER = 'exhq'
 
