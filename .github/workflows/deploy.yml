@@ -50,6 +50,9 @@ jobs:
           source venv/bin/activate
           pip install -r requirements.ci.txt
 
+      - name: Write zappa_settings.json from secret
+        run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
+
       - name: Deploy with Zappa
         run: |
           source venv/bin/activate
