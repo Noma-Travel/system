@@ -5,8 +5,8 @@ set -euo pipefail
 # 
 # Usage:
 #   ./zappa_update.sh <stage> [update|deploy] [--clean]
-#   ./zappa_update.sh exhq_1229a update
-#   ./zappa_update.sh exhq_1229a update --clean  # Force clean wheelhouse
+#   ./zappa_update.sh noma_prod update
+#   ./zappa_update.sh noma_prod update --clean  # Force clean wheelhouse
 #
 # What it does:
 # 1. Captures your EXACT current environment (pip freeze)
@@ -20,16 +20,7 @@ set -euo pipefail
 # - Wheelhouse is kept between deploys (faster subsequent deploys)
 # - Use --clean flag to force fresh download
 
-# Validate required arguments
-if [[ -z "${1:-}" ]]; then
-  echo "ERROR: Stage name is required" >&2
-  echo "" >&2
-  echo "Usage: $0 <stage> [update|deploy] [--clean]" >&2
-  echo "  <stage> - REQUIRED: Zappa stage name (must match a key in zappa_settings.json)" >&2
-  exit 1
-fi
-
-STAGE="$1"
+STAGE="${1:-noma_prod}"
 ACTION="${2:-update}"  # "deploy" for first-time; "update" otherwise
 CLEAN_BUILD=false
 
