@@ -7,3 +7,6 @@
 # This is required for Lambda/Zappa deployment packaging.
 ../dev/renglo-lib
 ../dev/renglo-api
+../extensions/noma/package
+../extensions/pes/package
+../extensions/pes_noma/package
