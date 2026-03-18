@@ -5,8 +5,8 @@ set -euo pipefail
 # 
 # Usage:
 #   ./zappa_deploy.sh <stage> [update|deploy] [--clean]
-#   ./zappa_deploy.sh noma_1007a update
-#   ./zappa_deploy.sh noma_1007a update --clean  # Force clean wheelhouse
+#   ./zappa_deploy.sh noma_prod update
+#   ./zappa_deploy.sh noma_prod update --clean  # Force clean wheelhouse
 #
 # What it does:
 # 1. Captures your EXACT current environment (pip freeze)
@@ -20,7 +20,7 @@ set -euo pipefail
 # - Wheelhouse is kept between deploys (faster subsequent deploys)
 # - Use --clean flag to force fresh download
 
-STAGE="${1:-noma_1007a}"
+STAGE="${1:-noma_prod}"
 ACTION="${2:-update}"  # "deploy" for first-time; "update" otherwise
 CLEAN_BUILD=false
 

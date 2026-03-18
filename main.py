@@ -112,6 +112,12 @@ def main():
     
     logger.info("Application configured successfully")
     logger.info(f"Running in {'Lambda' if app.config.get('IS_LAMBDA') else 'Local'} mode")
+
+    # Pin log level to LOG_LEVEL so Flask debug=True does not enable DEBUG logs
+    level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    log_level = getattr(logging, level_name, logging.INFO)
+    app.logger.setLevel(log_level)
+    logging.getLogger('renglo').setLevel(log_level)
     
     # Run the Flask development server
     # For production, use a proper WSGI server like gunicorn

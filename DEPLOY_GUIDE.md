@@ -1,5 +1,25 @@
 # Zappa Deployment Guide
 
+## Production deploy (noma_prod)
+
+To deploy the backend with **latest renglo-lib and extensions/noma** (e.g. after tool-install-on-org-creation changes):
+
+```bash
+cd system
+source venv/bin/activate   # or: .\venv\Scripts\activate on Windows
+
+# Refresh local packages so deploy uses current renglo-lib + noma
+pip install -r requirements.txt
+
+# Deploy (first time: use "deploy"; subsequent: use "update")
+./zappa_deploy.sh noma_prod update
+# Or force clean build: ./zappa_deploy.sh noma_prod update --clean
+```
+
+After redeploying you can delete all users and test the full flow; new organizations will get NOMA and SCHD tools installed automatically on creation.
+
+---
+
 ## How Environment Matching Works
 
 The `zappa_deploy.sh` script ensures your deployment environment **exactly matches** your dev environment using this process:
@@ -46,13 +66,13 @@ cd system
 source venv/bin/activate
 
 # Deploy (first time)
-./zappa_deploy.sh noma_1007a deploy
+./zappa_deploy.sh noma_prod deploy
 
 # Update (subsequent deploys - FAST, reuses wheelhouse)
-./zappa_deploy.sh noma_1007a update
+./zappa_deploy.sh noma_prod update
 
 # Update with clean build (fresh download of all packages)
-./zappa_deploy.sh noma_1007a update --clean
+./zappa_deploy.sh noma_prod update --clean
 ```
 
 ### When to Use `--clean`
@@ -112,7 +132,7 @@ The script automatically:
 
 To force fresh download:
 ```bash
-./zappa_deploy.sh noma_1007a update --clean
+./zappa_deploy.sh noma_prod update --clean
 ```
 
 ## Troubleshooting
@@ -121,7 +141,7 @@ To force fresh download:
 ```bash
 cd system
 source venv/bin/activate
-./zappa_deploy.sh noma_1007a update
+./zappa_deploy.sh noma_prod update
 ```
 
 ### "Editable installs detected"
@@ -134,14 +154,14 @@ If you update a package in dev:
 cd system
 source venv/bin/activate
 pip install --upgrade <package>
-./zappa_deploy.sh noma_1007a update --clean  # Force refresh
+./zappa_deploy.sh noma_prod update --clean  # Force refresh
 ```
 
 ### Deployment Failed with 502
 Check Lambda logs:
 ```bash
 source venv/bin/activate
-zappa tail noma_1007a
+zappa tail noma_prod
 ```
 
 Common causes:

@@ -1,9 +1,7 @@
-# Core Renglo packages installed from local directories
-# Zappa will pip install these when packaging for Lambda
+# Core Renglo packages installed from local directories (run from system/).
+# Installs latest renglo-lib, renglo-api, and extensions (noma, pes, pes_noma).
+# Before deploy: pip install -r requirements.txt then ./zappa_deploy.sh noma_prod update
 
-# Option 1: Install from local directories (current structure)
-# Use regular installs (not editable) so files are copied to site-packages
-# This is required for Lambda/Zappa deployment
 ../dev/renglo-lib
 ../dev/renglo-api
 ../extensions/noma/package
