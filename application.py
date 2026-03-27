@@ -8,7 +8,7 @@ Example usage:
     zappa deploy <project>  # Uses application.app
 
 Set URL_PREFIX in the environment to strip path segments before the app routes.
-Examples: "noma_prod", "x/y", "x/k/q/w" — supports any deployment path depth.
+Examples: "x_prod", "x/y", "x/k/q/w" — supports any deployment path depth.
 """
 
 from renglo_api import create_app
