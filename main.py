@@ -13,6 +13,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def load_runtime_env():
+    """
+    Load local runtime variables from env files.
+
+    Uses APP_ENV to select env.development/env.production.
+    Existing environment variables are preserved so shell/CI overrides still work.
+    """
+    app_env = (os.getenv('APP_ENV') or 'development').strip().lower()
+    env_filename = f"env.{app_env}"
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), env_filename)
+
+    if not os.path.exists(env_path):
+        logger.info(f"Env file not found: {env_filename} (skipping)")
+        return
+
+    loaded_keys = 0
+    with open(env_path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            if (
+                (value.startswith("'") and value.endswith("'"))
+                or (value.startswith('"') and value.endswith('"'))
+            ):
+                value = value[1:-1]
+
+            if key and key not in os.environ:
+                os.environ[key] = value
+                loaded_keys += 1
+
+    logger.info(f"Loaded env file: {env_filename} ({loaded_keys} vars)")
+
+
 def setup_aws_credentials():
     """
     Setup AWS credentials from environment variables.
@@ -88,7 +128,8 @@ def main():
     logger.info("Starting Renglo System")
     logger.info("=" * 60)
     
-    # Setup AWS credentials and region
+    # Load env file first, then setup AWS credentials and region
+    load_runtime_env()
     setup_aws_credentials()
     setup_aws_region()
     

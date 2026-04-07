@@ -10,7 +10,8 @@ set -euo pipefail
 #
 # What it does:
 # 1. Captures your EXACT current environment (pip freeze)
-# 2. Downloads wheels for all packages at exact versions
+# 2. Downloads wheels for all packages at exact versions (manylinux cp312 x86_64 for Lambda;
+#    set ZAPPA_LAMBDA_WHEEL_PLATFORM=0 to use host wheels — not valid for Lambda Linux)
 # 3. Creates clean deployment venv with those exact packages
 # 4. Installs local packages from source
 # 5. Deploys with Zappa
@@ -31,14 +32,34 @@ for arg in "$@"; do
   fi
 done
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEELHOUSE=".wheelhouse"
 DEPLOY_VENV=".venv_deploy"
 FREEZE_FILE=".freeze.txt"
 
+# Default: build for AWS Lambda (Linux x86_64, CPython 3.12). Required when running this script on
+# Windows/macOS so pip downloads and installs manylinux wheels; set ZAPPA_LAMBDA_WHEEL_PLATFORM=0
+# to use host wheels (broken on Lambda for native modules like pydantic_core).
+LAMBDA_PIP_PLATFORM_FLAGS=()
+if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]]; then
+  LAMBDA_PIP_PLATFORM_FLAGS=(--platform manylinux2014_x86_64 --implementation cp --python-version 312 --abi cp312)
+fi
+
 # Track original environment
 ORIG_VENV="${VIRTUAL_ENV:-}"
 ORIG_PATH="$PATH"
+
+# shellcheck disable=SC1091
+source_venv() {
+  local v="$1"
+  if [[ -f "$v/Scripts/activate" ]]; then
+    source "$v/Scripts/activate"
+  elif [[ -f "$v/bin/activate" ]]; then
+    source "$v/bin/activate"
+  else
+    echo "ERROR: No activate script in $v (expected Scripts/activate or bin/activate)" >&2
+    return 1
+  fi
+}
 
 # Cleanup function
 cleanup() {
@@ -46,14 +67,14 @@ cleanup() {
   echo "==> Cleaning up..."
   
   # Deactivate deploy venv if active
-  if [[ -n "${VIRTUAL_ENV:-}" && "${VIRTUAL_ENV:-}" == "$(pwd)/$DEPLOY_VENV" ]]; then
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
     command -v deactivate >/dev/null 2>&1 && deactivate || true
   fi
 
   # Reactivate original venv
   if [[ -n "$ORIG_VENV" && -d "$ORIG_VENV" ]]; then
     echo "==> Restoring original venv: $ORIG_VENV"
-    source "$ORIG_VENV/bin/activate" || true
+    source_venv "$ORIG_VENV" || true
   else
     export PATH="$ORIG_PATH"
   fi
@@ -99,10 +120,21 @@ echo ""
 echo "==> Step 1: Verify environment"
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: Not in a virtualenv. Please activate your dev venv first:" >&2
-  echo "  source venv/bin/activate" >&2
+  echo "  Linux/macOS: source venv/bin/activate" >&2
+  echo "  Windows Git Bash: source venv/Scripts/activate" >&2
   exit 1
 fi
 echo "    Current venv: $VIRTUAL_ENV"
+
+# Prefer the active venv's interpreter (avoids Windows Store python3 / wrong PATH)
+if [[ -x "$VIRTUAL_ENV/Scripts/python.exe" ]]; then
+  PYTHON_BIN="$VIRTUAL_ENV/Scripts/python.exe"
+elif [[ -x "$VIRTUAL_ENV/bin/python" ]]; then
+  PYTHON_BIN="$VIRTUAL_ENV/bin/python"
+else
+  PYTHON_BIN="${PYTHON_BIN:-python}"
+fi
+echo "    Using Python: $PYTHON_BIN"
 
 # Step 2: Capture exact environment
 echo "==> Step 2: Capturing current environment (exact versions)"
@@ -173,6 +205,22 @@ if [[ ${#EDITABLE_PATHS[@]} -eq 0 ]]; then
   echo "    No editable installs found"
 fi
 
+# Fallback: pip install -r requirements.txt often leaves only direct-url installs (not "editable").
+# Those still need to be installed from source in the deploy venv.
+if [[ ${#EDITABLE_PATHS[@]} -eq 0 && -f "requirements.txt" ]]; then
+  echo ""
+  echo "==> Step 3b: Resolving local package paths from requirements.txt"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="$(echo "$line" | xargs)"
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ ^\.\./ ]] && [[ -d "$line" ]]; then
+      EDITABLE_PATHS+=("$line")
+      echo "    Added: $line"
+    fi
+  done < requirements.txt
+fi
+
 # Step 4: Create wheelhouse directory
 echo ""
 echo "==> Step 4: Creating wheelhouse: $WHEELHOUSE"
@@ -180,13 +228,42 @@ rm -rf "$WHEELHOUSE"
 mkdir -p "$WHEELHOUSE"
 
 # Step 5: Download wheels for non-editable packages
+# Lambda runs Linux x86_64 (see zappa_settings.json runtime). On Windows/macOS, a plain
+# `pip download` pulls host-OS wheels; native modules (pydantic_core, cryptography, jiter, …)
+# then fail at import with errors like ModuleNotFoundError for pydantic_core._pydantic_core.
 echo ""
 echo "==> Step 5: Downloading wheels for frozen packages"
 if [[ -s "$FREEZE_FILE" ]]; then
-  pip download -r "$FREEZE_FILE" -d "$WHEELHOUSE" --no-deps
+  if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" == "0" ]]; then
+    echo "    ZAPPA_LAMBDA_WHEEL_PLATFORM=0: downloading for host platform (not for Lambda Linux)"
+    pip download -r "$FREEZE_FILE" -d "$WHEELHOUSE" --no-deps
+  else
+    echo "    Target: manylinux2014_x86_64 / cp312 (AWS Lambda python3.12)"
+    pip download -r "$FREEZE_FILE" -d "$WHEELHOUSE" --no-deps "${LAMBDA_PIP_PLATFORM_FLAGS[@]}"
+  fi
   echo "    Downloaded wheels to $WHEELHOUSE"
 else
   echo "    No packages to download"
+fi
+
+# greenlet: some releases (e.g. 3.3.2) publish only win/mac wheels + Linux sdist — no manylinux .whl.
+# pip cannot compile Linux greenlet on Windows; use a version that ships manylinux (gevent still supports it).
+if [[ -s "$FREEZE_FILE" ]] && [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]] && grep -q '^greenlet==' "$FREEZE_FILE"; then
+  echo ""
+  echo "==> Step 5b: Ensuring greenlet manylinux wheel (Lambda)"
+  rm -f "$WHEELHOUSE"/greenlet-*
+  pip download 'greenlet==3.2.5' -d "$WHEELHOUSE" --no-deps "${LAMBDA_PIP_PLATFORM_FLAGS[@]}" --only-binary=:all:
+  # Align freeze line with the wheel we install (avoids pip install version mismatch)
+  tmp_freeze="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^greenlet== ]]; then
+      echo "greenlet==3.2.5"
+    else
+      echo "$line"
+    fi
+  done < "$FREEZE_FILE" > "$tmp_freeze"
+  mv "$tmp_freeze" "$FREEZE_FILE"
+  echo "    Pinned greenlet==3.2.5 for Lambda (manylinux wheel)"
 fi
 
 # Step 6: Note editable installs (will be installed from source in deployment venv)
@@ -210,11 +287,15 @@ echo ""
 echo "==> Step 7: Creating clean deployment venv"
 deactivate 2>/dev/null || true
 rm -rf "$DEPLOY_VENV"
-$PYTHON_BIN -m venv "$DEPLOY_VENV"
-source "$DEPLOY_VENV/bin/activate"
+"$PYTHON_BIN" -m venv "$DEPLOY_VENV"
+source_venv "$DEPLOY_VENV"
 
 # Upgrade pip in deploy venv
 python -m pip install --upgrade pip setuptools wheel -q
+
+# venv purelib (reliable on Windows; getsitepackages()[0] can point elsewhere)
+DEPLOY_SITE="$(python -c "import os, sysconfig; print(os.path.normpath(sysconfig.get_path('purelib')))")"
+echo "    Deploy venv site-packages: $DEPLOY_SITE"
 
 # Step 8: Install from wheelhouse
 echo ""
@@ -223,7 +304,17 @@ echo "==> Step 8: Installing packages from wheelhouse"
 # First install PyPI packages from freeze file using wheelhouse
 if [[ -s "$FREEZE_FILE" ]]; then
   echo "    Installing from freeze file..."
-  pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE"
+  if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" == "0" ]]; then
+    pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE"
+  else
+    # Windows/macOS pip only allows --platform with --target (or --dry-run). Install into this
+    # venv's site-packages so the layout matches a normal environment for Zappa packaging.
+    # --no-deps: required by pip when using --platform with a requirements file; freeze is flat.
+    # --ignore-installed: without this, pip may skip packages already satisfied by the system Python
+    # (those packages are not what Zappa zips from the venv).
+    python -m pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE" --no-deps \
+      --ignore-installed "${LAMBDA_PIP_PLATFORM_FLAGS[@]}" --target "$DEPLOY_SITE"
+  fi
 else
   echo "    No freeze file to install from"
 fi
@@ -249,6 +340,17 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   done
 fi
 
+# Fail fast before Zappa packages a broken tree (Lambda imports werkzeug in handler).
+# Do not import pydantic_core here: manylinux wheels place a Linux .so that Windows cannot load,
+# but Zappa will package it correctly for Lambda.
+if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]]; then
+  echo "    Verifying imports (werkzeug)..."
+  python -c "import werkzeug; print('    Import check OK')" || {
+    echo "ERROR: werkzeug import failed in deploy venv. Fix wheelhouse / Step 8 before deploying." >&2
+    exit 1
+  }
+fi
+
 echo "    Installation complete"
 
 # Step 9: Ensure Zappa is installed
@@ -259,6 +361,16 @@ if ! command -v zappa >/dev/null 2>&1; then
   pip install zappa -q
 else
   echo "    Zappa already installed"
+fi
+
+# Step 9b: Patch Zappa (Windows / pip): handler venv pip must capture stderr
+echo ""
+echo "==> Step 9b: Patching Zappa create_handler_venv subprocess (Windows-safe)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" ]]; then
+  python "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" || echo "    (patch skipped or failed — continuing)"
+else
+  echo "    No scripts/patch_zappa_handler_venv.py — skipping"
 fi
 
 # Step 10: Verify no editable installs
@@ -317,7 +429,8 @@ echo "==> Deployment complete!"
 echo "=========================================="
 echo ""
 echo "To check logs:"
-echo "  source venv/bin/activate"
+echo "  source venv/Scripts/activate   # Windows Git Bash"
+echo "  source venv/bin/activate       # Linux/macOS"
 echo "  zappa tail $STAGE"
 echo ""
 

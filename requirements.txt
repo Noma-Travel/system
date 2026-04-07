@@ -1,12 +1,4 @@
-# Core Renglo packages installed from local directories (run from system/).
-# Installs latest renglo-lib, renglo-api, and extensions (noma, pes, pes_noma).
-# Before deploy: pip install -r requirements.txt then ./zappa_update.sh noma_prod update
-
-# Install from local directories (current structure).
-# Use regular installs (not editable) so files are copied to site-packages.
-# This is required for Lambda/Zappa deployment packaging.
-../dev/renglo-lib
-../dev/renglo-api
-../extensions/noma/package
-../extensions/pes/package
-../extensions/pes_noma/package
+# Backend Lambda bundle: install from Noma-Travel GitHub mirrors only.
+# Before first deploy, mirror renglo repos into Noma-Travel and push main.
+# If mirrors are not ready, use: pip install -r requirements-local.txt
+-r requirements-noma-travel.txt
