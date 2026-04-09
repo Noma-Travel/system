@@ -65,6 +65,13 @@ source_venv() {
 cleanup() {
   echo ""
   echo "==> Cleaning up..."
+
+  # If Step 13 failed after Step 12 moved .wheelhouse aside, put it back (next run needs it).
+  if [[ -n "${WHEELHOUSE_TMP:-}" && -d "${WHEELHOUSE_TMP}/wheelhouse" ]] && [[ ! -d "$WHEELHOUSE" ]]; then
+    echo "==> Restoring wheelhouse (deploy interrupted before normal restore)..."
+    mv "${WHEELHOUSE_TMP}/wheelhouse" "$WHEELHOUSE"
+    rmdir "${WHEELHOUSE_TMP}" 2>/dev/null || true
+  fi
   
   # Deactivate deploy venv if active
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
@@ -205,21 +212,35 @@ if [[ ${#EDITABLE_PATHS[@]} -eq 0 ]]; then
   echo "    No editable installs found"
 fi
 
-# Fallback: pip install -r requirements.txt often leaves only direct-url installs (not "editable").
-# Those still need to be installed from source in the deploy venv.
-if [[ ${#EDITABLE_PATHS[@]} -eq 0 && -f "requirements.txt" ]]; then
-  echo ""
-  echo "==> Step 3b: Resolving local package paths from requirements.txt"
+# Local ../ paths must always be installed from source: pip freeze strips git+ lines, and
+# non-editable git installs would otherwise be missing from the deploy venv. Merge these even
+# when the dev venv already has other editable installs (previously Step 3b ran only when
+# EDITABLE_PATHS was empty, which dropped e.g. ../extensions/backend/package).
+merge_local_paths_from_req() {
+  local reqfile="$1"
+  [[ -f "$reqfile" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"
     line="$(echo "$line" | xargs)"
     [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^-r[[:space:]] ]] && continue
     if [[ "$line" =~ ^\.\./ ]] && [[ -d "$line" ]]; then
-      EDITABLE_PATHS+=("$line")
-      echo "    Added: $line"
+      local found=false
+      for p in "${EDITABLE_PATHS[@]}"; do
+        if [[ "$p" == "$line" ]]; then found=true; break; fi
+      done
+      if [[ "$found" == false ]]; then
+        EDITABLE_PATHS+=("$line")
+        echo "    Added (local path from $reqfile): $line"
+      fi
     fi
-  done < requirements.txt
-fi
+  done < "$reqfile"
+}
+
+echo ""
+echo "==> Step 3b: Resolving local package paths from requirements files"
+merge_local_paths_from_req "requirements.txt"
+merge_local_paths_from_req "requirements-noma-travel.txt"
 
 # Step 4: Create wheelhouse directory
 echo ""
@@ -290,11 +311,23 @@ rm -rf "$DEPLOY_VENV"
 "$PYTHON_BIN" -m venv "$DEPLOY_VENV"
 source_venv "$DEPLOY_VENV"
 
+# Interpreter inside the deploy venv. Do NOT reuse PYTHON_BIN here — it still points at the
+# original dev venv; using it for DEPLOY_SITE or import checks installs/verifies the wrong tree
+# and Zappa then packages an empty .venv_deploy (Lambda: No module named 'werkzeug').
+if [[ -x "$DEPLOY_VENV/Scripts/python.exe" ]]; then
+  DEPLOY_PYTHON="$DEPLOY_VENV/Scripts/python.exe"
+elif [[ -x "$DEPLOY_VENV/bin/python" ]]; then
+  DEPLOY_PYTHON="$DEPLOY_VENV/bin/python"
+else
+  echo "ERROR: No python executable under $DEPLOY_VENV" >&2
+  exit 1
+fi
+
 # Upgrade pip in deploy venv
-python -m pip install --upgrade pip setuptools wheel -q
+"$DEPLOY_PYTHON" -m pip install --upgrade pip setuptools wheel -q
 
 # venv purelib (reliable on Windows; getsitepackages()[0] can point elsewhere)
-DEPLOY_SITE="$(python -c "import os, sysconfig; print(os.path.normpath(sysconfig.get_path('purelib')))")"
+DEPLOY_SITE="$("$DEPLOY_PYTHON" -c "import os, sysconfig; print(os.path.normpath(sysconfig.get_path('purelib')))")"
 echo "    Deploy venv site-packages: $DEPLOY_SITE"
 
 # Step 8: Install from wheelhouse
@@ -305,14 +338,14 @@ echo "==> Step 8: Installing packages from wheelhouse"
 if [[ -s "$FREEZE_FILE" ]]; then
   echo "    Installing from freeze file..."
   if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" == "0" ]]; then
-    pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE"
+    "$DEPLOY_PYTHON" -m pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE"
   else
     # Windows/macOS pip only allows --platform with --target (or --dry-run). Install into this
     # venv's site-packages so the layout matches a normal environment for Zappa packaging.
     # --no-deps: required by pip when using --platform with a requirements file; freeze is flat.
     # --ignore-installed: without this, pip may skip packages already satisfied by the system Python
     # (those packages are not what Zappa zips from the venv).
-    python -m pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE" --no-deps \
+    "$DEPLOY_PYTHON" -m pip install --no-index --find-links "$WHEELHOUSE" -r "$FREEZE_FILE" --no-deps \
       --ignore-installed "${LAMBDA_PIP_PLATFORM_FLAGS[@]}" --target "$DEPLOY_SITE"
   fi
 else
@@ -327,7 +360,7 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   for src in "${EDITABLE_PATHS[@]}"; do
     if [[ "$src" =~ renglo-lib ]]; then
       echo "      - $(basename "$src")"
-      pip install "$src" --no-deps
+      "$DEPLOY_PYTHON" -m pip install "$src" --no-deps
     fi
   done
   
@@ -335,7 +368,7 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   for src in "${EDITABLE_PATHS[@]}"; do
     if [[ ! "$src" =~ renglo-lib ]]; then
       echo "      - $(basename "$src")"
-      pip install "$src" --no-deps
+      "$DEPLOY_PYTHON" -m pip install "$src" --no-deps
     fi
   done
 fi
@@ -345,7 +378,7 @@ fi
 # but Zappa will package it correctly for Lambda.
 if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]]; then
   echo "    Verifying imports (werkzeug)..."
-  python -c "import werkzeug; print('    Import check OK')" || {
+  "$DEPLOY_PYTHON" -c "import werkzeug; print('    Import check OK')" || {
     echo "ERROR: werkzeug import failed in deploy venv. Fix wheelhouse / Step 8 before deploying." >&2
     exit 1
   }
@@ -356,19 +389,23 @@ echo "    Installation complete"
 # Step 9: Ensure Zappa is installed
 echo ""
 echo "==> Step 9: Ensuring Zappa is installed"
-if ! command -v zappa >/dev/null 2>&1; then
+if ! "$DEPLOY_PYTHON" -m pip show zappa >/dev/null 2>&1; then
   echo "    Installing zappa..."
-  pip install zappa -q
+  "$DEPLOY_PYTHON" -m pip install zappa -q
 else
   echo "    Zappa already installed"
 fi
+
+# Zappa entry point: `pip install --target` does not install console_scripts (no Scripts/zappa.exe).
+# Use the CLI module (zappa has no top-level __main__).
+ZAPPA_CLI=( "$DEPLOY_PYTHON" -m zappa.cli )
 
 # Step 9b: Patch Zappa (Windows / pip): handler venv pip must capture stderr
 echo ""
 echo "==> Step 9b: Patching Zappa create_handler_venv subprocess (Windows-safe)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" ]]; then
-  python "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" || echo "    (patch skipped or failed — continuing)"
+  "$DEPLOY_PYTHON" "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" || echo "    (patch skipped or failed — continuing)"
 else
   echo "    No scripts/patch_zappa_handler_venv.py — skipping"
 fi
@@ -376,9 +413,9 @@ fi
 # Step 10: Verify no editable installs
 echo ""
 echo "==> Step 10: Verifying no editable installs in deployment venv"
-if pip freeze | grep -q "^-e "; then
+if "$DEPLOY_PYTHON" -m pip freeze | grep -q "^-e "; then
   echo "ERROR: Editable installs detected in deployment venv!" >&2
-  pip freeze | grep "^-e " >&2
+  "$DEPLOY_PYTHON" -m pip freeze | grep "^-e " >&2
   exit 1
 else
   echo "    ✓ No editable installs (clean deployment venv)"
@@ -387,10 +424,10 @@ fi
 # Step 11: Show what will be deployed
 echo ""
 echo "==> Step 11: Deployment environment summary"
-echo "    Python: $(python --version)"
-echo "    Pip: $(pip --version)"
-echo "    Zappa: $(zappa --version 2>/dev/null || echo 'installed')"
-echo "    Total packages: $(pip list | tail -n +3 | wc -l | tr -d ' ')"
+echo "    Python: $($DEPLOY_PYTHON --version)"
+echo "    Pip: $($DEPLOY_PYTHON -m pip --version)"
+echo "    Zappa: $("${ZAPPA_CLI[@]}" --version 2>/dev/null | tail -n 1)"
+echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr -d ' ')"
 
 # Step 12: Temporarily move wheelhouse out of the way before Zappa packages
 echo ""
@@ -410,9 +447,9 @@ echo "=========================================="
 echo ""
 
 if [[ "$ACTION" == "deploy" ]]; then
-  zappa deploy "$STAGE"
+  "${ZAPPA_CLI[@]}" deploy "$STAGE"
 else
-  zappa update "$STAGE"
+  "${ZAPPA_CLI[@]}" update "$STAGE"
 fi
 
 # Restore wheelhouse after packaging (before cleanup)
