@@ -197,6 +197,7 @@ The script builds a temporary **`.venv_deploy`**, installs dependencies there (i
 - `zappa tail noma_prod` — or `python -m zappa.cli tail noma_prod` from the same venv if `zappa` is not on `PATH`.
 - Health: `/ping` responds.
 - No repeated **502**/**500** on important routes (e.g. `/auth/tree`, `/auth/user`, portfolio checks). **502** from API Gateway plus **`ImportModuleError`** / missing **`werkzeug`** in CloudWatch usually means a **bad Lambda zip** — fix packaging and redeploy; browser **CORS** errors on those calls often go away once Lambda returns **200**.
+- For chat/tools: check CloudWatch for `No module named ...` and filesystem errors such as `Read-only file system`. In Lambda, only **`/tmp`** is writable.
 
 After a successful backend deploy, you can reset test users and re-run full flows; new organizations can get NOMA and SCHD tools installed automatically on creation where that logic is enabled.
 
@@ -252,7 +253,27 @@ If Step 12 moves `.wheelhouse` aside and Step 13 fails, cleanup **restores** `.w
 | `Editable installs detected` in deployment venv | Should not happen; check script output and that you did not `pip install -e` into `.venv_deploy`. |
 | Wrong package versions after dev upgrade | `pip install --upgrade <pkg>` in dev, then `./zappa_update.sh noma_prod update --clean`. |
 | **502** / **ImportModuleError** / **werkzeug** | Re-run `./zappa_update.sh noma_prod update --clean`; confirm Step 11 **Total packages** is large. Check `zappa_settings.json` env and CloudWatch. |
+| `No module named 'noma'` / `No module named 'noma.utilities...'` / `No module named 'noma.handlers.rextur'` | Confirm `requirements.txt` includes `../extensions/backend/package` (local fallback) and re-run deploy. Ensure `extensions/backend/package/pyproject.toml` uses package discovery for `noma*` (not only `["noma","noma.handlers"]`). |
+| Tool returns empty/fallback answer but CloudWatch shows handler error | Read the **handler_call** log entry. If it shows filesystem writes failing (e.g. `Read-only file system: 'rextur_response.json'`), patch handler debug writes to `/tmp` or make them best-effort only. |
 | Browser **CORS** on API calls | Often a **symptom** of 502/error responses without CORS headers; fix Lambda first, then re-check `FE_BASE_URL` / `APP_FE_BASE_URL` if needed. |
+
+### Deployed artifact integrity check (recommended after packaging changes)
+
+Use this when changing `requirements*`, `pyproject.toml`, or handler package structure:
+
+1. Check deployed Lambda timestamp:
+   ```bash
+   aws lambda get-function-configuration --function-name noma-noma-prod --profile noma --region us-east-1 --query "LastModified"
+   ```
+2. Download deployed zip from `aws lambda get-function --query "Code.Location"`.
+3. Inspect zip contents and verify critical modules exist (example):
+   - `noma/handlers/agent_trips.py`
+   - `noma/handlers/rextur/rextur_flight_parser.py`
+   - `noma/utilities/common_utils.py`
+   - `renglo/...`, `pes/...`, `pes_noma/...`
+4. For native deps, confirm Linux binaries are present in zip (e.g. `pydantic_core/*.so`, `cryptography/.../_rust.abi3.so`).
+
+This avoids false confidence from local imports on Windows/macOS and catches missing modules before user tests.
 
 ---
 
@@ -292,6 +313,9 @@ With a fresh user:
 4. Tools/actions are present in org.
 5. Console loads org tree without CORS/auth errors.
 6. NOMA chat/API requests resolve portfolio/org context correctly.
+7. Send a chat message and verify websocket streaming appears.
+8. Execute at least one tool-heavy action (e.g. flight search) and confirm cards/UI payload render (not only assistant text fallback).
+9. If a tool says "no results", confirm in CloudWatch whether tool output was truly empty vs handler error.
 
 ---
 
@@ -301,6 +325,8 @@ With a fresh user:
 - If the browser shows **CORS** errors after backend deploy, first confirm the API is not returning **502** (Lambda import/runtime failure); then re-check `FE_BASE_URL` / `APP_FE_BASE_URL` and redeploy backend if needed.
 - If testing local frontend against deployed backend, temporarily enable `ALLOW_DEV_ORIGINS` and redeploy backend.
 - If onboarding data looks stale after resets, refresh tree cache and rerun the post-deploy setup sequence.
+- If chat connects but no answer arrives, inspect `/_chat/message` path in CloudWatch and confirm the handler in `core` executed successfully (not blocked by import/runtime errors).
+- If plan/action executes but UI receives fallback text instead of cards, inspect the tool `handler_call` log result first; many "no results" responses are downstream of tool exceptions.
 
 ---
 

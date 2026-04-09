@@ -3,6 +3,6 @@
 
 ../dev/renglo-lib
 ../dev/renglo-api
-../extensions/noma/package
+../extensions/backend/package
 ../extensions/pes/package
 ../extensions/pes_noma/package
