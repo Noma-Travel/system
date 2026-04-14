@@ -3,5 +3,5 @@
 
 git+https://github.com/Noma-Travel/renglo-lib.git@main_noma#egg=renglo-lib
 git+https://github.com/Noma-Travel/renglo-api.git@main#egg=renglo-api
-git+https://github.com/Noma-Travel/backend.git@main#egg=noma-mod&subdirectory=package
+# git+https://github.com/Noma-Travel/backend.git@main#egg=noma-mod&subdirectory=package
 git+https://github.com/Noma-Travel/pes_noma.git@main#egg=pes-noma-mod&subdirectory=package
