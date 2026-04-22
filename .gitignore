@@ -2,8 +2,11 @@
 gtironi_accessKeys.csv
 env.development
 env.production
+.env.development
+.env.production
 
 # Local artifacts
+debug/
 .wheelhouse_test*/
 parsed_rextur_result.json
 rextur_response.json
