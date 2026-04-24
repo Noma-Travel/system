@@ -32,5 +32,6 @@ __pycache__/
 env_config.py
 zappa_settings.json
 run.sh
+run.bat
 package-lock.json
 .gitmodules

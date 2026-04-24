@@ -1,0 +1,5 @@
+@echo off
+set AWS_PROFILE=<YOUR_PROFILE>
+set AWS_DEFAULT_REGION=<REGION>
+
+python main.py
