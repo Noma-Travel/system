@@ -1,0 +1,8 @@
+# Local workspace installs (same layout as before Noma-Travel migration).
+# Use when all repos are cloned under C:/Noma as today.
+
+../dev/renglo-lib
+../dev/renglo-api
+../extensions/backend/package
+../extensions/pes/package
+../extensions/pes_noma/package

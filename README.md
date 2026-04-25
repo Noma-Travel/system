@@ -11,7 +11,6 @@ Root
 │   ├── env_config.py           ← System configuration
 │   ├── main.py                 ← Application Point of Entry
 │   ├── wsgi.py                 ← Production WSGI entry point
-│   ├── lambda_handler.py       ← AWS Lambda handler
 │   ├── requirements.txt        ← System dependencies
 │   └── README.md
 │
@@ -210,31 +209,46 @@ mkdir extensions
 cd extensions
 ```
 
-Clone schd and data extensions
+Clone the system extensions  (schd, data, pes) 
 
 ```
-git clone https://github.com/renglo/schd.git
+git clone https://github.com/Noma-Travel/schd.git
 git clone https://github.com/renglo/data.git
+git clone https://github.com/renglo/pes.git
 ```
+
+Install the system extensions
+```
+cd extensions
+pip install -e schd/package
+pip install -e pes/package
+
+```
+
+Install the extension blueprints
+
+# if you are in extensions/
+python schd/installer/upload_blueprints.py <env> --aws-profile <profile> --aws-region <region>
+python pes/installer/upload_blueprints.py <env> --aws-profile <profile> --aws-region <region>
+
+#python schd/installer/upload_blueprints.py renglo --aws-profile maker  --aws-region us-east-1
+#python pes/installer/upload_blueprints.py renglo --aws-profile maker --aws-region us-east-1
 
 
 Step 5b.
 
-Installing custom extensions
+Installing custom extensions UI
 
-
-Clone the extension code
+Clone the extension code (in /extensions)
 ```
 git clone https://some-url-where-repository-is-hosted/some-extension.git
 ```
 
-Install the extension handlers
-```
-pip install -e extensions/some-extension/package
+Installing the handlers
 
-```
+If you want to install the handlers, consult /extensions/<extension_name>/service/README.md
 
-(Optional) if you want to show the extension in the 'account_settings' section to be installed by the user do the following.
+(Optional) if you want to give the user the option to install the extension in their portfolio (in the 'account_settings' section) do the following.
 ```
 # Open the console config files (.env.development and .env.production) 
 # Add the name of the extension to VITE_EXTENSIONS (it is a comma separated string)
@@ -286,3 +300,104 @@ The system offers a lot of out of the box functionality:
 - `/time` - Current time (authenticated)
 
 Visit `http://localhost:5001/ping` to verify the application is running.
+
+
+
+
+## Setting up the WebSocket API
+
+Manual Process
+
+- Go to API Gateway in the AWS Console
+- Create  a new API  APIs > Create API > WebSocket API > Build
+
+Step 1 > API details
+API name: <api_name>  //This is the api name, it can be called anything
+Route selection expression: $request.body.action
+IP address type: IPv4
+
+Step 2 > Routes
+Select Add Custom Route
+Route key:  chat_message
+
+Step 3 > Integrations
+
+Integration type: HTTP
+Method: POST
+URL endpoint: <integration_target>
+
+NOTE >> The “integration_target_base” is the URL of the stage in the REST api (which was automatically created by Zappa) on deployment. 
+It is the same URL that appears when you deploy something with Zappa
+- a. Select the RESTful API in the API Gateway
+- b. Go to the Stages section
+- c. Look for the Invoke URL
+
+
+integration_target = integration_target_base + "/_chat/message"
+
+Example: "https://abcdef1234.execute-api.us-east-1.amazonaws.com/something_prod_0305a/_chat/message"
+
+Step 4 > Stages
+Stage name: <environment>  (prod|dev)
+
+Step 5 > Integration Request 
+
+Once the API is saved. Click on the Route called chat_message,  go to Integration Request tab and enter the following template
+
+Name: message_template
+```
+#set($inputRoot = $input.path('$'))
+{
+  "action": "$inputRoot.action",
+  "data": "$inputRoot.data",
+  "entity_type": "$inputRoot.entity_type",
+  "entity_id": "$inputRoot.entity_id",
+  "thread": "$inputRoot.thread",
+  "portfolio": "$inputRoot.portfolio",
+  "org": "$inputRoot.org",
+  "core": "$inputRoot.core",
+  "next": "$inputRoot.next",
+  "connectionId": "$context.connectionId",
+  "auth": "$inputRoot.auth"
+}
+
+```
+
+Add the name of the template ("message_template") to the Template selection expression
+
+IMPORTANT: Every time you make a change in the templates or routes, you need to click on "Deploy API" otherwise the changes won't reflect.
+
+
+Adjust the Integration request settings
+
+- Change  "HTTP proxy integration"  to False
+
+- Change "Content handling" to Passthrough
+
+Step 6 > Configure your backEnd and FrontEnds
+
+Go to the stages section and copy both variables: WebSocketURL and @connectionsURL
+
+WebSocket URL looks like this:
+```
+wss://xyz.execute-api.us-east-1.amazonaws.com/test/
+```
+
+@connections URL looks like this:
+```
+https://xyz.execute-api.us-east-1.amazonaws.com/production/@connections
+```
+
+In the Console production config file (console/.env.production) place the WebSocket URL in the VITE_WEBSOCKET_URL constant
+```
+VITE_WEBSOCKET_URL='wss://xyz.execute-api.us-east-1.amazonaws.com/test/'
+```
+
+If you are using a different FrontEnd, find the websocket url constant used to send messages to the backEnd
+
+
+In the backEnd production config file (system/env_config.py) place the @connections URL without the @connections sufix
+```
+WEBSOCKET_CONNECTIONS='https://xyz.execute-api.us-east-1.amazonaws.com/production'
+```
+

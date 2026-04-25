@@ -1,62 +1,33 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Secrets and local env (never commit)
+gtironi_accessKeys.csv
+env.development
+env.production
 
-# Virtual Environment
-venv/
-ENV/
-env/
+# Local artifacts
+.wheelhouse_test*/
+parsed_rextur_result.json
+rextur_response.json
 
-# Environment-specific config (may contain secrets)
-# Uncomment if you want to ignore env_config.py in git
-# env_config.py
+# Runtime debug dumps and local deploy/verify scratch (do not commit)
+debug/
+.verify_noma_handlers/
+.verify_wheels/
+_deployed_*.zip
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Deployment
-deployment/
-*.zip
-lambda-deployment.zip
-
-# Zappa deployment script artifacts
+# Deployment/runtime artifacts (local only)
+.freeze.txt
 .wheelhouse/
 .venv_deploy/
-.freeze.txt
-requirements.lock
-requirements.in
+handler_venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Config
-run.sh
+# Local helper/config files
 env_config.py
 zappa_settings.json
-
+run.sh
+package-lock.json
+.gitmodules

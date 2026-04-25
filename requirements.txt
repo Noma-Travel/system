@@ -1,23 +1,11 @@
-# Core Renglo packages installed from local directories (run from system/).
-# Installs latest renglo-lib, renglo-api, and extensions (noma, pes, pes_noma).
-# Before deploy: pip install -r requirements.txt then ./zappa_deploy.sh noma_prod update
+# Backend Lambda bundle install set used by deployment script.
+# During migration, this references requirements-noma-travel.txt (hybrid)
+# so deployment can continue while missing Noma-Travel repos are created.
+-r requirements-noma-travel.txt
 
-../dev/renglo-lib
-../dev/renglo-api
+# NOMA handler package: pip freeze strips git+ URLs, so zappa_update.sh installs this path
+# into the deploy venv explicitly (see Step 3b). Without it, Lambda raises No module named 'noma'.
 ../extensions/backend/package
-../extensions/inca/package
-../extensions/pes/package
-../extensions/pes_noma/package
 
-# Note: The following extensions are commented out as they don't exist yet
-# Uncomment and install when available:
-# -e ../extensions/enerclave/package
-# -e ../extensions/scheduler/package
-
-# Option 2: If these are on GitHub, use git URLs instead:
-# git+https://github.com/your-org/renglo-lib.git@main#egg=renglo-lib
-# git+https://github.com/your-org/renglo-api.git@main#egg=renglo-api
-# git+https://github.com/your-org/noma-mod.git@main#egg=noma-mod
-
-# All other dependencies are specified in the setup.py files above
-# and will be installed automatically by pip
+# For local development with workspace clones instead of git URLs, use:
+#   pip install -r requirements-local.txt

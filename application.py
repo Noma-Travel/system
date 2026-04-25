@@ -5,7 +5,7 @@ Use this with production WSGI servers like Gunicorn, uWSGI, or Zappa.
 
 Example usage:
     gunicorn application:app -w 4 -b 0.0.0.0:8000
-    zappa deploy noma_1007a  # Uses application.app
+    zappa deploy <project>  # Uses application.app
 """
 
 from renglo_api import create_app
