@@ -6,3 +6,6 @@
 # NOMA handler package: pip freeze strips git+ URLs, so zappa_update.sh installs this path
 # into the deploy venv explicitly (see Step 3b). Without it, Lambda raises No module named 'noma'.
 ../extensions/backend/package
+
+# For local development with workspace clones instead of git URLs, use:
+#   pip install -r requirements-local.txt

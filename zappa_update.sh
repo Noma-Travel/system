@@ -33,8 +33,10 @@ for arg in "$@"; do
 done
 
 WHEELHOUSE=".wheelhouse"
-DEPLOY_VENV=".venv_deploy"
 FREEZE_FILE=".freeze.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Absolute path: Git Bash + relative ".venv_deploy" can break -f/-x tests for Scripts/python.exe
+DEPLOY_VENV="${SCRIPT_DIR}/.venv_deploy"
 
 # Default: build for AWS Lambda (Linux x86_64, CPython 3.12). Required when running this script on
 # Windows/macOS so pip downloads and installs manylinux wheels; set ZAPPA_LAMBDA_WHEEL_PLATFORM=0
@@ -66,6 +68,9 @@ cleanup() {
   echo ""
   echo "==> Cleaning up..."
 
+  # Windows venv activate can strip MSYS paths; restore coreutils + mingw64 for bash/cygpath.
+  export PATH="/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+
   # If Step 13 failed after Step 12 moved .wheelhouse aside, put it back (next run needs it).
   if [[ -n "${WHEELHOUSE_TMP:-}" && -d "${WHEELHOUSE_TMP}/wheelhouse" ]] && [[ ! -d "$WHEELHOUSE" ]]; then
     echo "==> Restoring wheelhouse (deploy interrupted before normal restore)..."
@@ -88,6 +93,13 @@ cleanup() {
 
   # Remove deploy venv
   rm -rf "$DEPLOY_VENV"
+
+  # Remove werkzeug vendored at project root for Zappa packaging (Step 8c)
+  if [[ -f "$SCRIPT_DIR/.werkzeug_vendored_for_zappa" ]]; then
+    rm -rf "$SCRIPT_DIR/werkzeug"
+    rm -f "$SCRIPT_DIR/.werkzeug_vendored_for_zappa"
+    echo "==> Removed temporary vendored werkzeug/ from project root"
+  fi
   
   # Keep wheelhouse by default for faster re-deploys
   # (Use --clean flag on next run to refresh it)
@@ -133,6 +145,22 @@ if [[ -z "${VIRTUAL_ENV:-}" ]]; then
 fi
 echo "    Current venv: $VIRTUAL_ENV"
 
+# Cursor / minimal hosts: a prior broken `source venv/Scripts/activate` can leave
+# _OLD_VIRTUAL_PATH pointing at a Windows-only PATH; the next line in activate runs
+# `cygpath` after `deactivate` restores that PATH — cygpath disappears. Fix PATH and
+# re-source this venv once so _OLD_* matches a MSYS-safe PATH.
+if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" ]] && [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  export PATH="/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+  unset _OLD_VIRTUAL_PATH _OLD_VIRTUAL_PYTHONHOME _OLD_VIRTUAL_PS1 2>/dev/null || true
+  if [[ -f "${VIRTUAL_ENV}/Scripts/activate" ]]; then
+    # shellcheck disable=SC1090
+    source "${VIRTUAL_ENV}/Scripts/activate"
+  elif [[ -f "${VIRTUAL_ENV}/bin/activate" ]]; then
+    # shellcheck disable=SC1090
+    source "${VIRTUAL_ENV}/bin/activate"
+  fi
+fi
+
 # Prefer the active venv's interpreter (avoids Windows Store python3 / wrong PATH)
 if [[ -x "$VIRTUAL_ENV/Scripts/python.exe" ]]; then
   PYTHON_BIN="$VIRTUAL_ENV/Scripts/python.exe"
@@ -142,6 +170,28 @@ else
   PYTHON_BIN="${PYTHON_BIN:-python}"
 fi
 echo "    Using Python: $PYTHON_BIN"
+
+# CPython that must run `python -m venv` for the deploy tree. On Windows, if you create a venv
+# using an *already-virtual* python.exe (the dev venv), the child venv is invalid: pyvenv.cfg
+# chains to the parent and sys.prefix stays the parent venv, so all pip --target and imports hit
+# the wrong site-packages. Resolve the real base install from the dev venv's pyvenv.cfg.
+# shellcheck disable=SC2016
+VENV_BASE_PYTHON="$("$PYTHON_BIN" -c 'import pathlib, sys; cfg = pathlib.Path(sys.prefix) / "pyvenv.cfg"
+if not cfg.is_file():
+    print(sys.executable)
+    raise SystemExit(0)
+for line in cfg.read_text(encoding="utf-8").splitlines():
+    s = line.strip()
+    if s.lower().startswith("executable") and "=" in s:
+        print(s.split("=", 1)[1].strip())
+        break
+else:
+    print(sys.executable)
+' 2>/dev/null || true)"
+if [[ -z "$VENV_BASE_PYTHON" || ! -e "$VENV_BASE_PYTHON" ]]; then
+  VENV_BASE_PYTHON="$PYTHON_BIN"
+fi
+echo "    Base Python for new venvs (python -m venv): $VENV_BASE_PYTHON"
 
 # Step 2: Capture exact environment
 echo "==> Step 2: Capturing current environment (exact versions)"
@@ -308,18 +358,31 @@ echo ""
 echo "==> Step 7: Creating clean deployment venv"
 deactivate 2>/dev/null || true
 rm -rf "$DEPLOY_VENV"
-"$PYTHON_BIN" -m venv "$DEPLOY_VENV"
+"$VENV_BASE_PYTHON" -m venv "$DEPLOY_VENV"
 source_venv "$DEPLOY_VENV"
+# Windows Scripts/activate drops MSYS paths; restore for basename/grep/mktemp/rm.
+export PATH="/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+# Force the deploy venv to win over the still-on-PATH dev venv: on Git Bash, nested activate can
+# leave venv/Scripts before .venv_deploy/Scripts, so `command -v python.exe` keeps using the dev venv
+# and pip --target writes the wrong site-packages (Zappa zip missing werkzeug).
+export PATH="${DEPLOY_VENV}/Scripts:${PATH}"
 
-# Interpreter inside the deploy venv. Do NOT reuse PYTHON_BIN here — it still points at the
-# original dev venv; using it for DEPLOY_SITE or import checks installs/verifies the wrong tree
-# and Zappa then packages an empty .venv_deploy (Lambda: No module named 'werkzeug').
-if [[ -x "$DEPLOY_VENV/Scripts/python.exe" ]]; then
+# Interpreter: always the deploy venv binary (never rely on PATH order for `python`).
+if [[ -e "$DEPLOY_VENV/Scripts/python.exe" ]]; then
   DEPLOY_PYTHON="$DEPLOY_VENV/Scripts/python.exe"
-elif [[ -x "$DEPLOY_VENV/bin/python" ]]; then
+elif [[ -e "$DEPLOY_VENV/bin/python" ]]; then
   DEPLOY_PYTHON="$DEPLOY_VENV/bin/python"
 else
-  echo "ERROR: No python executable under $DEPLOY_VENV" >&2
+  echo "ERROR: No python under $DEPLOY_VENV (expected Scripts/python.exe or bin/python)" >&2
+  exit 1
+fi
+if ! "$DEPLOY_PYTHON" -c "import sys" 2>/dev/null; then
+  echo "ERROR: Not runnable: $DEPLOY_PYTHON" >&2
+  exit 1
+fi
+if ! "$DEPLOY_PYTHON" -c "import os, sys; b=os.path.basename(os.path.normpath(sys.prefix)); assert b=='.venv_deploy', (b, sys.prefix, sys.executable)"; then
+  echo "ERROR: $DEPLOY_PYTHON is not the deploy venv (sys.prefix should end in .venv_deploy). Got:" >&2
+  "$DEPLOY_PYTHON" -c "import sys; print('sys.prefix', sys.prefix); print('sys.executable', sys.executable)" >&2
   exit 1
 fi
 
@@ -373,6 +436,40 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   done
 fi
 
+# Step 8b: Freeze + --target may install renglo-* from pip's cached wheel (stale vs your working tree).
+# Always refresh renglo-lib / renglo-api from ../dev so Lambda gets the same code you edit locally.
+echo ""
+echo "==> Step 8b: Refresh renglo-lib and renglo-api from dev tree (no stale pip cache)"
+_RENGLO_LIB="${SCRIPT_DIR}/../dev/renglo-lib"
+_RENGLO_API="${SCRIPT_DIR}/../dev/renglo-api"
+if [[ -d "$_RENGLO_LIB" ]]; then
+  echo "    pip install --force-reinstall: $_RENGLO_LIB"
+  "$DEPLOY_PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps "$_RENGLO_LIB"
+else
+  echo "    (skip) not found: $_RENGLO_LIB"
+fi
+if [[ -d "$_RENGLO_API" ]]; then
+  echo "    pip install --force-reinstall: $_RENGLO_API"
+  "$DEPLOY_PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps "$_RENGLO_API"
+else
+  echo "    (skip) not found: $_RENGLO_API"
+fi
+
+# Step 8c: Zappa's Windows+manylinux zip merge can omit pure-Python packages from site-packages
+# even when they import in the deploy venv. Zappa's handler.py imports werkzeug before the app
+# (see venv/Lib/site-packages/zappa/handler.py). Vendoring ensures /var/task/werkzeug exists in Lambda.
+echo ""
+echo "==> Step 8c: Vendoring werkzeug into project root for Zappa/Lambda zip"
+if [[ -d "$DEPLOY_SITE/werkzeug" ]]; then
+  rm -rf "$SCRIPT_DIR/werkzeug"
+  cp -R "$DEPLOY_SITE/werkzeug" "$SCRIPT_DIR/werkzeug"
+  : > "$SCRIPT_DIR/.werkzeug_vendored_for_zappa"
+  echo "    Copied werkzeug/ from deploy venv to project root (removed in cleanup on exit)"
+else
+  echo "ERROR: werkzeug not found under deploy site-packages: $DEPLOY_SITE" >&2
+  exit 1
+fi
+
 # Fail fast before Zappa packages a broken tree (Lambda imports werkzeug in handler).
 # Do not import pydantic_core here: manylinux wheels place a Linux .so that Windows cannot load,
 # but Zappa will package it correctly for Lambda.
@@ -403,7 +500,6 @@ ZAPPA_CLI=( "$DEPLOY_PYTHON" -m zappa.cli )
 # Step 9b: Patch Zappa (Windows / pip): handler venv pip must capture stderr
 echo ""
 echo "==> Step 9b: Patching Zappa create_handler_venv subprocess (Windows-safe)"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" ]]; then
   "$DEPLOY_PYTHON" "$SCRIPT_DIR/scripts/patch_zappa_handler_venv.py" || echo "    (patch skipped or failed — continuing)"
 else

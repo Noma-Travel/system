@@ -1,0 +1,80 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout system repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Configure AWS profile for Zappa
+        run: |
+          mkdir -p ~/.aws
+          echo "[noma]" > ~/.aws/credentials
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "[profile noma]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
+          echo "output = json" >> ~/.aws/config
+
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Create virtual environment and install tools
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install zappa setuptools
+
+      - name: Install application dependencies
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.ci.txt
+
+      - name: Write zappa_settings.json from secret
+        run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
+
+      - name: Validate required CORS environment variables
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+
+          with open("zappa_settings.json", "r", encoding="utf-8") as fh:
+              data = json.load(fh)
+
+          stage = data.get("noma_prod") or {}
+          env = stage.get("environment_variables") or {}
+
+          required = ("FE_BASE_URL", "APP_FE_BASE_URL")
+          missing = [k for k in required if not str(env.get(k, "")).strip()]
+          if missing:
+              print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
+              sys.exit(1)
+
+          print("zappa_settings.json validation OK for CORS-critical variables")
+          PY
+
+      - name: Deploy with Zappa
+        run: |
+          source venv/bin/activate
+          zappa update noma_prod

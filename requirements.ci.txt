@@ -1,0 +1,8 @@
+# CI/CD requirements - installs dependency packages from GitHub repos
+# Used by GitHub Actions workflow (local dev uses requirements.txt with local paths)
+
+git+https://github.com/renglo/renglo-lib.git@main
+git+https://github.com/renglo/renglo-api.git@main
+git+https://github.com/renglo/noma.git@main#subdirectory=package
+git+https://github.com/renglo/pes.git@main#subdirectory=package
+git+https://github.com/Noma-Travel/pes_noma.git@main#subdirectory=package

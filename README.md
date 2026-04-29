@@ -212,7 +212,7 @@ cd extensions
 Clone the system extensions  (schd, data, pes) 
 
 ```
-git clone https://github.com/renglo/schd.git
+git clone https://github.com/Noma-Travel/schd.git
 git clone https://github.com/renglo/data.git
 git clone https://github.com/renglo/pes.git
 ```
@@ -302,102 +302,4 @@ The system offers a lot of out of the box functionality:
 Visit `http://localhost:5001/ping` to verify the application is running.
 
 
-
-
-## Setting up the WebSocket API
-
-Manual Process
-
-- Go to API Gateway in the AWS Console
-- Create  a new API  APIs > Create API > WebSocket API > Build
-
-Step 1 > API details
-API name: <api_name>  //This is the api name, it can be called anything
-Route selection expression: $request.body.action
-IP address type: IPv4
-
-Step 2 > Routes
-Select Add Custom Route
-Route key:  chat_message
-
-Step 3 > Integrations
-
-Integration type: HTTP
-Method: POST
-URL endpoint: <integration_target>
-
-NOTE >> The “integration_target_base” is the URL of the stage in the REST api (which was automatically created by Zappa) on deployment. 
-It is the same URL that appears when you deploy something with Zappa
-- a. Select the RESTful API in the API Gateway
-- b. Go to the Stages section
-- c. Look for the Invoke URL
-
-
-integration_target = integration_target_base + "/_chat/message"
-
-Example: "https://abcdef1234.execute-api.us-east-1.amazonaws.com/something_prod_0305a/_chat/message"
-
-Step 4 > Stages
-Stage name: <environment>  (prod|dev)
-
-Step 5 > Integration Request 
-
-Once the API is saved. Click on the Route called chat_message,  go to Integration Request tab and enter the following template
-
-Name: message_template
-```
-#set($inputRoot = $input.path('$'))
-{
-  "action": "$inputRoot.action",
-  "data": "$inputRoot.data",
-  "entity_type": "$inputRoot.entity_type",
-  "entity_id": "$inputRoot.entity_id",
-  "thread": "$inputRoot.thread",
-  "portfolio": "$inputRoot.portfolio",
-  "org": "$inputRoot.org",
-  "core": "$inputRoot.core",
-  "next": "$inputRoot.next",
-  "connectionId": "$context.connectionId",
-  "auth": "$inputRoot.auth"
-}
-
-```
-
-Add the name of the template ("message_template") to the Template selection expression
-
-IMPORTANT: Every time you make a change in the templates or routes, you need to click on "Deploy API" otherwise the changes won't reflect.
-
-
-Adjust the Integration request settings
-
-- Change  "HTTP proxy integration"  to False
-
-- Change "Content handling" to Passthrough
-
-Step 6 > Configure your backEnd and FrontEnds
-
-Go to the stages section and copy both variables: WebSocketURL and @connectionsURL
-
-WebSocket URL looks like this:
-```
-wss://xyz.execute-api.us-east-1.amazonaws.com/test/
-```
-
-@connections URL looks like this:
-```
-https://xyz.execute-api.us-east-1.amazonaws.com/production/@connections
-```
-
-In the Console production config file (console/.env.production) place the WebSocket URL in the VITE_WEBSOCKET_URL constant
-```
-VITE_WEBSOCKET_URL='wss://xyz.execute-api.us-east-1.amazonaws.com/test/'
-```
-
-If you are using a different FrontEnd, find the websocket url constant used to send messages to the backEnd
-
-
-In the backEnd production config file (system/env_config.py) place the @connections URL without the @connections sufix
-```
-WEBSOCKET_CONNECTIONS='https://xyz.execute-api.us-east-1.amazonaws.com/production'
-```
 

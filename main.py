@@ -135,9 +135,10 @@ def main():
     
     logger.info("-" * 60)
     
-    # Option 1: Load from env_config.py in current directory
-    # The env_config.py file is in this application directory, not in renglo-api
-    app = create_app()
+    # Always load env_config.py from this file's directory (not process cwd).
+    # This avoids config drift under debug reloaders or alternate launch dirs.
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'env_config.py')
+    app = create_app(config_path=config_path)
     
     # Option 2: Pass config directly (uncomment to use)
     # config = {
@@ -165,10 +166,12 @@ def main():
     port = int(os.getenv('PORT', 5001))  # Port 5000 is often used by macOS AirPlay
     
     logger.info(f"Starting server on port {port}...")
+    # Keep local runs deterministic by default; enable reloader only when explicitly requested.
+    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
     app.run(
         host='0.0.0.0',
         port=port,
-        debug=True
+        debug=debug_mode
     )
 
 

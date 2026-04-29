@@ -11,10 +11,23 @@ debug/
 parsed_rextur_result.json
 rextur_response.json
 
+# Runtime debug dumps and local deploy/verify scratch (do not commit)
+debug/
+.verify_noma_handlers/
+.verify_wheels/
+_deployed_*.zip
+
 # Deployment/runtime artifacts (local only)
 .freeze.txt
 .wheelhouse/
 .venv_deploy/
+.venv_deploy_test/
+_test_wh/
+_test_wh2/
+_tvenv/
+# Ephemeral Zappa step: werkzeug/ copied to project root for packaging (see zappa_update.sh Step 8c)
+werkzeug/
+.werkzeug_vendored_for_zappa
 handler_venv/
 venv/
 __pycache__/
