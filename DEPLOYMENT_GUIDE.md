@@ -277,26 +277,48 @@ This avoids false confidence from local imports on Windows/macOS and catches mis
 
 ---
 
-## 9) Mandatory post-deploy org initialization
+## 9) Post-deploy: environment blueprints & per-org provisioning
 
-After backend deploy, perform these in order:
+### 9a) Environment-level blueprint upload (once per deploy, not per tenant)
 
-1. Upload tools/actions through Console.
-2. Upload blueprint:
+After backend deploy, ensure the `noma_config` blueprint exists in DynamoDB so that new-org provisioning can create config documents from it.
 
 ```bash
 python upload_blueprints.py noma-prod --aws-profile noma --aws-region us-east-1 --blueprint noma_config
+```
+
+Or use the all-in-one script which also handles per-org tools/config:
+
+```bash
+python noma_post_deploy_org.py --env-file C:/Noma/system/env.production --aws-profile noma --aws-region us-east-1 --env-name noma-prod --portfolio <ID> --org <ID>
 ```
 
 Notes:
 
 - Script path: `C:/Noma/extensions/backend/installer/upload_blueprints.py`.
 - Environment name maps to DynamoDB `{env}_blueprints` (example: `noma-prod` → `noma-prod_blueprints`).
+- This is a **release prerequisite**, not a per-tenant step. Without it, `BlueprintController.get_blueprint('irma', 'noma_config', 'last')` fails and org onboarding step 11 (config creation) breaks.
 - Production frontend for backend CORS/env: `https://app.travelwithnoma.com`.
 - **Console production API base** (`C:/Noma/console/.env.production`): `https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod` — `VITE_API_URL` must match for deployed console builds.
 - Console dev can use `VITE_API_URL=/api` with `VITE_API_PROXY_TARGET` pointing at that API base to avoid browser CORS during local dev.
 - Production websocket in console `.env.production`: use the **wss** URL from API Gateway for your WebSocket ApiId (e.g. `wss://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production` — no trailing slash for NOMA). Align with Lambda `WEBSOCKET_CONNECTIONS` in `zappa_settings.json` if realtime breaks.
 - AWS profile/region for CLI: `noma` / `us-east-1`.
+
+### 9b) Per-org provisioning (automatic on org creation)
+
+When a new org is created via `POST /_auth/orgs/<portfolio_id>`, the backend's `create_org_funnel` automatically runs `NomaOnboardings` which:
+
+1. Creates NOMA and SCHD tool entities + relationships.
+2. Uploads tools/actions catalogs (`schd_tools`, `schd_actions`) via `UploadToolsAndActions`.
+3. Creates job documents (`schd_jobs`).
+4. Creates the `noma_config` document from the environment blueprint defaults.
+5. Refreshes the auth tree.
+
+**No manual Console upload of tools/actions is needed for new orgs.** If the API returns HTTP 207, the org was created but tool provisioning failed—check CloudWatch logs for `create_org_funnel | install_default_tools` entries.
+
+To repair an org that was created before this automation (or where provisioning failed), run `noma_post_deploy_org.py` with `--portfolio` and `--org` flags, or call `/_schd/run/noma/noma_onboardings` with `{portfolio, team, org}`.
+
+### 9c) Environment config updates
 
 3. Update config for new environment variables if needed (backend and/or blueprint).
 4. Upload/publish updated config through Console.
