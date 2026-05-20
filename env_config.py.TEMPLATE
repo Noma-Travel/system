@@ -2,6 +2,7 @@ WL_NAME='x'
 
 BASE_URL = 'x'
 FE_BASE_URL = 'x'
+APP_FE_BASE_URL = 'x'
 DOC_BASE_URL = 'x'
 AWS_REGION = 'x'
 
@@ -42,6 +43,11 @@ S3_BUCKET_NAME = ''
 
 #OPEN AI
 OPENAI_API_KEY=''
+
+# Invite / transactional email (Resend)
+RESEND_API_KEY=''
+INVITE_FROM='Noma <noreply@example.com>'
+SES_INVITE_SENDER='noreply@example.com'
 
 #---------
 

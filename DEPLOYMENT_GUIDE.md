@@ -87,6 +87,22 @@ Loaded from `zappa_settings.json` env vars in Lambda and/or env config files (`e
 - `WEBSOCKET_CONNECTIONS`
 - `DYNAMODB_*` tables, `S3_BUCKET_NAME`, etc.
 
+#### Invite email (Resend)
+
+Used by `renglo-lib` `auth_model.send_email` / `invite_user_funnel` and by `noma/invite_attendant` (localized PT/EN invites). Set these in **`zappa_settings.json`** (`environment_variables` for `noma_prod`) and/or **`env_config.py`** for local runs. `renglo.common.load_config` loads them when present in the process environment (see `env_var_keys` in `renglo-lib/renglo/common.py`).
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `RESEND_API_KEY` | **Yes** for sending | API key from the [Resend dashboard](https://resend.com/api-keys). If missing, invite and other Resend-backed handlers return `RESEND_API_KEY is not configured`. |
+| `INVITE_FROM` | Recommended | `From` address for invitation emails (e.g. `Noma <noreply@travelwithnoma.com>`). Domain must be **verified in Resend** or sends return 422. |
+| `SES_INVITE_SENDER` | Optional fallback | Legacy sender string (pre–Resend migration). Used only when `INVITE_FROM` is unset (`auth_controller` cascade: `INVITE_FROM` → `SES_INVITE_SENDER` → default). |
+| `BASE_URL` | For invite links | Public frontend base URL embedded in `/invite?code=...`. May be empty in Zappa; see below. |
+| `APP_FE_BASE_URL` / `FE_BASE_URL` | For invite links | `invite_attendant` resolves the invite link host as `BASE_URL` → `APP_FE_BASE_URL` → `FE_BASE_URL` → `http://127.0.0.1:3000`. Production should set at least one non-empty FE URL (both are set to `https://app.travelwithnoma.com` in `noma_prod`). |
+
+**Production (`noma_prod`):** Before deploying the renglo-lib invite/Resend changes, set `RESEND_API_KEY` in `zappa_settings.json` (or update the Lambda environment in AWS after deploy). `INVITE_FROM` is already templated in `zappa_settings.json`; adjust if your verified Resend domain differs. Do not commit live API keys to git if your policy forbids it—use an empty placeholder in JSON and inject the key via AWS Console / Secrets Manager, then redeploy or `zappa update`.
+
+**Local:** Copy values into `env_config.py` (see `env_config.py.TEMPLATE`). `RESEND_API_KEY` and `INVITE_FROM` mirror what other handlers (`create_invoice`, `flight_monitor`) already expect.
+
 CORS / allowed access in backend:
 
 - In Lambda, allowed origins are built from `FE_BASE_URL` + `APP_FE_BASE_URL`.
@@ -165,6 +181,7 @@ aws amplify start-job --region us-east-1 --app-id d1f1y2ixvuy9lc --branch-name m
 
 - `FE_BASE_URL` and `APP_FE_BASE_URL` are both `https://app.travelwithnoma.com` (for production).
 - `ALLOW_DEV_ORIGINS` has the intended value for the target environment.
+- **Invite email:** `RESEND_API_KEY` is set (non-empty) in `zappa_settings.json` or on the Lambda function; `INVITE_FROM` uses a Resend-verified domain (or `SES_INVITE_SENDER` is set as fallback). After changing these, run `./zappa_update.sh noma_prod update`.
 
 ### Commands
 
@@ -198,6 +215,7 @@ The script builds a temporary **`.venv_deploy`**, installs dependencies there (i
 - Health: `/ping` responds.
 - No repeated **502**/**500** on important routes (e.g. `/auth/tree`, `/auth/user`, portfolio checks). **502** from API Gateway plus **`ImportModuleError`** / missing **`werkzeug`** in CloudWatch usually means a **bad Lambda zip** — fix packaging and redeploy; browser **CORS** errors on those calls often go away once Lambda returns **200**.
 - For chat/tools: check CloudWatch for `No module named ...` and filesystem errors such as `Read-only file system`. In Lambda, only **`/tmp`** is writable.
+- **Invite email:** trigger a test invite (dashboard → Add Traveler, new email). CloudWatch should log `Using BASE_URL for invite link: https://app.travelwithnoma.com` (not `127.0.0.1`). Recipient inbox should show localized subject/CTA; Resend dashboard should show delivery. If send fails, check `RESEND_API_KEY`, `INVITE_FROM` domain verification, and handler logs for Resend error messages.
 
 After a successful backend deploy, you can reset test users and re-run full flows; new organizations can get NOMA and SCHD tools installed automatically on creation where that logic is enabled.
 
@@ -256,6 +274,8 @@ If Step 12 moves `.wheelhouse` aside and Step 13 fails, cleanup **restores** `.w
 | `No module named 'noma'` / `No module named 'noma.utilities...'` / `No module named 'noma.handlers.rextur'` | Confirm `requirements.txt` includes `../extensions/backend/package` (local fallback) and re-run deploy. Ensure `extensions/backend/package/pyproject.toml` uses package discovery for `noma*` (not only `["noma","noma.handlers"]`). |
 | Tool returns empty/fallback answer but CloudWatch shows handler error | Read the **handler_call** log entry. If it shows filesystem writes failing (e.g. `Read-only file system: 'rextur_response.json'`), patch handler debug writes to `/tmp` or make them best-effort only. |
 | Browser **CORS** on API calls | Often a **symptom** of 502/error responses without CORS headers; fix Lambda first, then re-check `FE_BASE_URL` / `APP_FE_BASE_URL` if needed. |
+| Invite email not sent / `RESEND_API_KEY is not configured` | Set `RESEND_API_KEY` on Lambda (`zappa_settings.json` → redeploy, or AWS Console). Confirm `INVITE_FROM` domain is verified in Resend. |
+| Invite link points to `127.0.0.1` in production | Set `FE_BASE_URL` and/or `APP_FE_BASE_URL` in `zappa_settings.json`; ensure `renglo-lib` loads `APP_FE_BASE_URL` (in `env_var_keys`). Empty `BASE_URL` is OK if FE URLs are set. |
 
 ### Deployed artifact integrity check (recommended after packaging changes)
 
