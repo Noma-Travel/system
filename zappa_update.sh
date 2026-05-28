@@ -201,6 +201,9 @@ pip freeze --exclude-editable > "$FREEZE_FILE.tmp"
 grep -v "^-e " "$FREEZE_FILE.tmp" | \
 grep -v "\.git@" | \
 grep -v "^file://" | \
+grep -v "^noma-mod==" | \
+grep -v "^renglo-api==" | \
+grep -v "^renglo-lib==" | \
 grep -E "^[a-zA-Z0-9_-]+" > "$FREEZE_FILE" || touch "$FREEZE_FILE"
 
 rm -f "$FREEZE_FILE.tmp"

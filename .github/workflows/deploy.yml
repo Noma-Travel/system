@@ -58,6 +58,7 @@ jobs:
           python - <<'PY'
           import json
           import sys
+          from urllib.parse import urlparse
 
           with open("zappa_settings.json", "r", encoding="utf-8") as fh:
               data = json.load(fh)
@@ -65,16 +66,48 @@ jobs:
           stage = data.get("noma_prod") or {}
           env = stage.get("environment_variables") or {}
 
-          required = ("FE_BASE_URL", "APP_FE_BASE_URL")
+          required = ("FE_BASE_URL", "APP_FE_BASE_URL", "CORS_ALLOWED_ORIGINS")
           missing = [k for k in required if not str(env.get(k, "")).strip()]
           if missing:
               print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
               sys.exit(1)
 
+          def normalize_origin(value: str) -> str:
+              v = (value or "").strip().rstrip("/")
+              p = urlparse(v)
+              if p.scheme not in ("http", "https") or not p.netloc:
+                  raise ValueError(f"invalid origin: {value!r}")
+              if p.path not in ("", "/"):
+                  raise ValueError(f"origin must not include path: {value!r}")
+              return f"{p.scheme}://{p.netloc}"
+
+          fe_origin = normalize_origin(str(env.get("FE_BASE_URL", "")))
+          app_fe_origin = normalize_origin(str(env.get("APP_FE_BASE_URL", "")))
+          cors_raw = str(env.get("CORS_ALLOWED_ORIGINS", ""))
+          cors_origins = {
+              normalize_origin(part)
+              for part in cors_raw.split(",")
+              if part.strip()
+          }
+          expected = {fe_origin, app_fe_origin}
+          missing_from_cors = sorted(expected - cors_origins)
+          if missing_from_cors:
+              print(
+                  "ERROR: CORS_ALLOWED_ORIGINS must include FE_BASE_URL and APP_FE_BASE_URL. "
+                  f"Missing: {', '.join(missing_from_cors)}"
+              )
+              sys.exit(1)
+
+          allow_dev = str(env.get("ALLOW_DEV_ORIGINS", "")).strip().lower()
+          if allow_dev in {"1", "true", "yes", "on"}:
+              print("ERROR: ALLOW_DEV_ORIGINS must be false/empty in noma_prod")
+              sys.exit(1)
+
           print("zappa_settings.json validation OK for CORS-critical variables")
           PY
 
-      - name: Deploy with Zappa
+      - name: Deploy with manual packaging script
         run: |
           source venv/bin/activate
-          zappa update noma_prod
+          chmod +x ./zappa_update.sh
+          ./zappa_update.sh noma_prod update
