@@ -450,7 +450,11 @@ if [[ -f requirements.ci.txt ]]; then
     "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r requirements.ci.txt --target "$DEPLOY_SITE" --upgrade
   fi
   echo "    Verifying CI package imports..."
-  "$DEPLOY_PYTHON" -c "import renglo_api, renglo, noma; print('    CI packages import OK')" || {
+  # find_spec only checks install layout; importing renglo_api runs create_app() and needs Cognito env.
+  "$DEPLOY_PYTHON" -c "import importlib.util
+for mod in ('renglo_api', 'renglo', 'noma'):
+    assert importlib.util.find_spec(mod), mod
+print('    CI packages import OK')" || {
     echo "ERROR: requirements.ci.txt packages failed to import in deploy venv" >&2
     exit 1
   }
