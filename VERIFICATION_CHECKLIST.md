@@ -53,6 +53,44 @@ Add as secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_
 
 Without **Actions: Read and write**, `repository_dispatch` fails with *Resource not accessible by personal access token*.
 
+**Also check:** If the org uses SAML SSO, open the PAT in GitHub → **Configure SSO** → authorize **Noma-Travel**. After creating or rotating the PAT, re-paste it into `SYSTEM_REPO_PAT` on every triggering repo (updating the PAT in GitHub settings alone is not enough).
+
+---
+
+## Staging login bootstrap
+
+Staging uses a **fresh Cognito pool** (`us-east-1_vBbXLDESt`). Production users are **not** copied automatically.
+
+| Symptom | Cause |
+|---------|--------|
+| "Credenciais inválidas" with a prod email/password | User does not exist in staging Cognito yet |
+
+**Option A — Admin-create your user (recommended for UAT):**
+
+```bash
+# 1. Create user (email as username)
+aws cognito-idp admin-create-user \
+  --user-pool-id us-east-1_vBbXLDESt \
+  --username "you@travelwithnoma.com" \
+  --user-attributes Name=email,Value=you@travelwithnoma.com Name=email_verified,Value=true Name=name,Value="Your Name" \
+  --message-action SUPPRESS \
+  --profile noma
+
+# 2. Set a staging-only password (must be permanent before login works)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id us-east-1_vBbXLDESt \
+  --username "you@travelwithnoma.com" \
+  --password "YOUR_STAGING_PASSWORD" \
+  --permanent \
+  --profile noma
+```
+
+**Option B — Self-serve signup:** On the Amplify **staging** branch only, set `NEXT_PUBLIC_SIGNUP_POLICY=open_self_serve`, redeploy, then use **Criar conta**. Default is `invite_only`.
+
+**Amplify check:** Staging branch overrides must include `NEXT_PUBLIC_AWS_USER_POOL_ID=us-east-1_vBbXLDESt` and `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID=6rcfm5lsscs5ocnlu4ftukdbjr` (not prod pool IDs).
+
+After first login you may need to **complete onboarding** (new org/portfolio in staging DynamoDB) — expected on a fresh environment.
+
 ---
 
 ## B. Deploy triggers — staging
@@ -110,7 +148,7 @@ Without **Actions: Read and write**, `repository_dispatch` fails with *Resource 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
 | F1 | `GET {staging-api}/ping` | 200, `{"pong":true}` | **PASS** | Verified 2026-06-08. |
-| F2 | NOMA staging app loads; login with test user | Cognito auth against staging pool | PENDING | Manual — browser at Amplify staging URL. |
+| F2 | NOMA staging app loads; login with test user | Cognito auth against staging pool | PENDING | **Staging Cognito is separate from prod** — pool `us-east-1_vBbXLDESt` starts empty. Prod passwords do not work. Bootstrap a user (see **Staging login bootstrap** below). |
 | F3 | Console local against staging API | API calls hit staging Gateway, not prod | PENDING | Copy [`console/.env.staging-local.TEMPLATE`](../console/.env.staging-local.TEMPLATE) → `.env.development`. |
 | F4 | WebSocket from NOMA staging | Handshake succeeds | PENDING | Manual — send chat message; check Network → WS. |
 | F5 | Staging DynamoDB / Cognito / S3 isolated from prod | No prod table names in Lambda env | PENDING | Compare `ZAPPA_SETTINGS_STAGING` vs prod secret. |
