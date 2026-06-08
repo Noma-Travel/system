@@ -28,34 +28,3 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
       ZAPPA_SETTINGS: ${{ secrets.ZAPPA_SETTINGS_STAGING }}
 
-  # Deferred until step 7c (STAGING_SYNC_ORGS + backend post-deploy on staging).
-  # post_deploy:
-  #   needs: deploy
-  #   uses: ./.github/workflows/post-deploy-reusable.yml
-  #   with:
-  #     env_name: noma-staging
-  #     zappa_stage: noma_staging
-  #     requirements_file: requirements.ci.staging.txt
-  #     backend_git_ref: staging
-  #     sync_orgs_env_var: STAGING_SYNC_ORGS
-  #   secrets:
-  #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #     GH_PAT: ${{ secrets.GH_PAT }}
-  #     ZAPPA_SETTINGS: ${{ secrets.ZAPPA_SETTINGS_STAGING }}
-  #     SYNC_ORGS: ${{ secrets.STAGING_SYNC_ORGS }}
-
-  notify_failure:
-    needs: [deploy]
-    if: ${{ always() && needs.deploy.result == 'failure' }}
-    uses: ./.github/workflows/notify-deploy-failure.yml
-    with:
-      environment_label: staging
-      deploy_result: ${{ needs.deploy.result }}
-      post_deploy_result: skipped
-    secrets:
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
-      SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
-      GH_PAT: ${{ secrets.GH_PAT }}
-      USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}
