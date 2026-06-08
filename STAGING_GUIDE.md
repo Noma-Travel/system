@@ -124,7 +124,7 @@ If the environment has **no orgs yet** (fresh staging), `post_deploy` still uplo
 
 See **Step 7c** below and [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) §9a.
 
-**Each triggering repo** (`backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`): **`SYSTEM_REPO_PAT`** — fine-grained PAT with `contents:read` and permission to dispatch workflows on `Noma-Travel/system`.
+**Each triggering repo** (`backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`): **`SYSTEM_REPO_PAT`** — fine-grained PAT on **`Noma-Travel/system`** with **`Contents: Read and write`** (required for `repository_dispatch`) plus **Metadata: Read**. Actions: Read and write alone is **not** sufficient. Re-paste the token into each repo secret after changing permissions.
 
 ## Infrastructure (provisioned 2026-06-08)
 
