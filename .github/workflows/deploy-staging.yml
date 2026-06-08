@@ -36,7 +36,7 @@ jobs:
       environment_label: staging
       deploy_result: ${{ needs.deploy.result }}
       post_deploy_result: skipped
-      secondary_job_label: post_deploy (deferred)
+      secondary_job_label: "post_deploy (deferred)"
     secrets:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
