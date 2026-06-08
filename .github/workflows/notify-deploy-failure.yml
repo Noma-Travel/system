@@ -68,6 +68,7 @@ jobs:
           commit_sha = os.environ.get("GITHUB_SHA", "")
           commit_message = ""
           source_repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_url = ""
 
           if event_name == "repository_dispatch":
               payload = event.get("client_payload") or {}
@@ -87,6 +88,15 @@ jobs:
               author_login = str(user.get("login") or "").strip()
               head = (event.get("pull_request") or {}).get("head") or {}
               commit_sha = str(head.get("sha") or commit_sha).strip()
+          elif event_name == "workflow_run":
+              wr = event.get("workflow_run") or {}
+              head = wr.get("head_commit") or {}
+              author = head.get("author") or {}
+              author_email = str(author.get("email") or "").strip()
+              author_login = str(author.get("username") or author.get("name") or "").strip()
+              commit_sha = str(wr.get("head_sha") or commit_sha).strip()
+              commit_message = str(head.get("message") or "").strip()
+              run_url = str(wr.get("html_url") or "").strip()
 
           def is_noreply(email: str) -> bool:
               return not email or "noreply.github.com" in email.lower()
@@ -126,10 +136,11 @@ jobs:
               failed_parts.append(secondary_label)
           failed_summary = ", ".join(failed_parts) or "unknown step"
 
-          run_url = (
-              f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
-              f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
-          )
+          if event_name != "workflow_run" or not run_url:
+              run_url = (
+                  f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
+                  f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+              )
           env_label = os.environ.get("ENVIRONMENT_LABEL", "unknown")
           workflow = os.environ.get("GITHUB_WORKFLOW", "workflow")
           repo = os.environ.get("GITHUB_REPOSITORY", "")
