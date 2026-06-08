@@ -33,7 +33,7 @@ on:
       ZAPPA_SETTINGS:
         required: true
       SYNC_ORGS:
-        required: true
+        required: false
 
 jobs:
   post_deploy:
@@ -119,12 +119,18 @@ jobs:
           SYNC_ORGS_JSON: ${{ secrets.SYNC_ORGS }}
         run: |
           source venv/bin/activate
-          export "${{ inputs.sync_orgs_env_var }}=${SYNC_ORGS_JSON}"
+          if [ -n "${SYNC_ORGS_JSON}" ]; then
+            export "${{ inputs.sync_orgs_env_var }}=${SYNC_ORGS_JSON}"
+            echo "Using explicit org list from ${{ inputs.sync_orgs_env_var }} secret"
+          else
+            echo "No org sync secret set — discovering all orgs from DynamoDB"
+          fi
           python backend/installer/noma_post_deploy_env.py \
             --env-file post_deploy.env \
             --env-name "${{ inputs.env_name }}" \
             --aws-profile noma \
             --aws-region us-east-1 \
             --sync-orgs-env-var "${{ inputs.sync_orgs_env_var }}" \
+            --sync-all-orgs \
             --tools-mode reset \
             --validate
