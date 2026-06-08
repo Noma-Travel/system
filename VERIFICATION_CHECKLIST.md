@@ -39,13 +39,27 @@ Acceptance gate before treating the NOMA staging/production CI/CD rollout as com
 
 **Pre-check:** Each triggering repo has secret `SYSTEM_REPO_PAT` with dispatch permission on `Noma-Travel/system`.
 
+### Secrets setup — `SYSTEM_REPO_PAT`
+
+Create a **fine-grained PAT** (or classic PAT with `repo` scope) with access to **`Noma-Travel/system`**:
+
+| Permission | Level |
+|------------|-------|
+| Metadata | Read |
+| Contents | Read |
+| **Actions** | **Read and write** |
+
+Add as secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`.
+
+Without **Actions: Read and write**, `repository_dispatch` fails with *Resource not accessible by personal access token*.
+
 ---
 
 ## B. Deploy triggers — staging
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| B1 | Push to `backend/staging` only | `Deploy Backend (Staging)` runs; `noma-noma-staging` updates | **FAIL → FIX** | Run [27160246163](https://github.com/Noma-Travel/backend/actions/runs/27160246163) failed: multiline `commit_message` broke JSON. Fixed with `toJSON()` — re-test after push. |
+| B1 | Push to `backend/staging` only | `Deploy Backend (Staging)` runs; `noma-noma-staging` updates | **FAIL → ACTION** | JSON payload fixed (`toJSON`). Remaining error: `Resource not accessible by personal access token` — update `SYSTEM_REPO_PAT` on each triggering repo (see **Secrets setup** below). |
 | B2 | Push to `system/staging` | Staging deploy uses `requirements.ci.staging.txt` (`@staging` refs) | **PASS** | [Run 27160059162](https://github.com/Noma-Travel/system/actions/runs/27160059162) — deploy + post_deploy green. |
 | B3 | `staging` branch exists in all 9 repos | Branches present | **PASS** | Verified 2026-06-08 via GitHub API. |
 | B3b | Branch protection on `staging` / `main` | Rules configured per [`STAGING_GUIDE.md`](STAGING_GUIDE.md) | PENDING | Manual — GitHub Settings → Branches. |
@@ -84,7 +98,7 @@ Acceptance gate before treating the NOMA staging/production CI/CD rollout as com
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
 | E1 | Amplify build on `NOMA/staging` | `test:component` + `test:e2e:nonchat` pass | PENDING | Check Amplify Console → staging branch builds. |
-| E2 | GitHub Actions `e2e.yml` on push/PR to `staging` | `build` + `e2e-smoke` pass | **FAIL → FIX** | Run [27160279793](https://github.com/Noma-Travel/Noma/actions/runs/27160279793) — workflow file error (`needs.e2e-smoke` invalid). Fixed with `needs['e2e-smoke']`. |
+| E2 | GitHub Actions `e2e.yml` on push/PR to `staging` | `build` + `e2e-smoke` pass | **PENDING** | Removed cross-repo `notify_failure` job (blocked workflow validation). Re-add via `workflow_run` after `system` repo grants reusable workflow access to `Noma`. |
 | E3 | Deployed `.next` artifact has no Cypress binary | Runtime bundle unchanged | PENDING | Cypress is devDependency only; confirm in Amplify artifact. |
 
 **Pre-check (NOMA repo secrets):** `NEXT_PUBLIC_*`, `CYPRESS_LOGIN_EMAIL`, `CYPRESS_LOGIN_PASSWORD`, plus notification secrets if using `notify_failure` job.
