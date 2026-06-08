@@ -109,14 +109,20 @@ Pushes to `staging` or `main` in dependency repos dispatch deploys to the **syst
 
 **`system` repo:** existing `AWS_*`, `GH_PAT`, `ZAPPA_SETTINGS` plus **`ZAPPA_SETTINGS_STAGING`** (staging Lambda config with `noma_staging` stage).
 
-**Post-deploy org sync (step 7c — end of rollout):**
+**Post-deploy org sync (step 7c):**
+
+By default, **`post_deploy` discovers all portfolio/org pairs** from DynamoDB (`{env}_entities`) and syncs tools/actions for every org. **No GitHub secret is required.**
+
+Optional override secrets (only if you want to limit sync to a subset, e.g. during debugging):
 
 | Secret | Purpose |
 |--------|---------|
-| `DEPLOY_SYNC_ORGS` | Prod org(s) for `post_deploy` after `deploy.yml` |
-| `STAGING_SYNC_ORGS` | Staging org(s) after seeding a test tenant in staging |
+| `DEPLOY_SYNC_ORGS` | Optional prod subset — JSON `[{"portfolio":"…","org":"…"}]` |
+| `STAGING_SYNC_ORGS` | Optional staging subset — same format |
 
-Format: `[{"portfolio":"<id>","org":"<id>"}]` — see [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) §9a.
+If the environment has **no orgs yet** (fresh staging), `post_deploy` still uploads blueprints and **skips** tools sync with a log message.
+
+See **Step 7c** below and [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) §9a.
 
 **Each triggering repo** (`backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`): **`SYSTEM_REPO_PAT`** — fine-grained PAT with `contents:read` and permission to dispatch workflows on `Noma-Travel/system`.
 
@@ -141,71 +147,44 @@ Launcher (`deploy_environment.py noma-staging`) created:
 
 **Console (`console` repo):** local developer tool only — run with `npm run dev` and `.env.development` / `.env.production` pointing at the API you are debugging. **Not** deployed via Amplify (no staging branch or app).
 
-**Step 7c (post-deploy org sync):** configure `DEPLOY_SYNC_ORGS` / `STAGING_SYNC_ORGS` secrets — see below.
+**Step 7c (post-deploy):** automatic org discovery from DynamoDB — no secrets required.
 
 See also [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for production deploy flow.
 
 ---
 
-## Step 7c — Post-deploy org sync secrets
+## Step 7c — Post-deploy org sync (automatic)
 
-After each Zappa deploy, **`post_deploy`** uploads all blueprints and syncs `schd_tools` / `schd_actions` for configured orgs. Without these secrets, `post_deploy` fails (by design).
+After each Zappa deploy, **`post_deploy`**:
 
-### GitHub secrets (`Noma-Travel/system` → Settings → Secrets)
+1. Uploads **all** blueprints to `{env}_blueprints`
+2. **Discovers every org** in DynamoDB (`irn:entity:portfolio:*` → orgs under each portfolio)
+3. Syncs `schd_tools` / `schd_actions` for each org (`reset` mode)
+4. Validates blueprint read-back and tool/action counts
 
-| Secret | Environment | When to set |
-|--------|-------------|-------------|
-| `DEPLOY_SYNC_ORGS` | Production | After you confirm prod portfolio + org IDs |
-| `STAGING_SYNC_ORGS` | Staging | After you create a test tenant in staging |
+**You do not need `DEPLOY_SYNC_ORGS` or `STAGING_SYNC_ORGS`** unless you want to restrict sync to a subset (optional override).
 
-**Format** (JSON array, one line):
-
-```json
-[{"portfolio":"<12-char-portfolio-id>","org":"<12-char-org-id>"}]
-```
-
-Multiple orgs:
+### Optional secrets (subset override only)
 
 ```json
-[{"portfolio":"PORT_A","org":"ORG_A"},{"portfolio":"PORT_B","org":"ORG_B"}]
+[{"portfolio":"<id>","org":"<id>"}]
 ```
 
-### Production — find `DEPLOY_SYNC_ORGS` values
+Use only for debugging or limiting blast radius — not for normal operation.
 
-1. Log into **production** NOMA (`app.travelwithnoma.com` or prod Amplify URL).
-2. Open DevTools → **Network**.
-3. Trigger any API call (e.g. load dashboard).
-4. Find a request to `/_data/`, `/_chat/`, or `/_auth/tree`.
-5. Copy **`portfolio`** and **`org`** from request headers (`X-Portfolio-Id`, `X-Org-Id`) or URL path.
+### Fresh staging (zero orgs)
 
-Historical dev IDs in `NOMA/.env.local` comments are **not** trusted — verify against live prod.
+Until someone signs up on staging NOMA, discovery finds 0 orgs: blueprints still upload; tools sync is skipped (success).
 
-### Staging — seed a test tenant, then set `STAGING_SYNC_ORGS`
-
-1. Open **staging NOMA**: `https://staging.d1uvu3pkmkr1l6.amplifyapp.com`
-2. **Sign up** or **invite** a test user (staging Cognito pool `us-east-1_vBbXLDESt`).
-3. Complete onboarding so a portfolio + org exist.
-4. Copy portfolio/org IDs from Network tab (same as prod steps above).
-5. Add secret **`STAGING_SYNC_ORGS`** with those IDs.
-
-Optional local repair for one org:
+### Local manual run (one org)
 
 ```bash
 python C:/Noma/extensions/backend/installer/noma_post_deploy_org.py ^
   --env-file C:/Noma/system/post_deploy.env ^
   --env-name noma-staging ^
-  --aws-profile noma ^
-  --aws-region us-east-1 ^
-  --portfolio <ID> ^
-  --org <ID> ^
-  --tools-mode reset
+  --aws-profile noma --aws-region us-east-1 ^
+  --portfolio <ID> --org <ID> --tools-mode reset
 ```
-
-(Export staging Lambda env vars to `post_deploy.env` first, or use values from `zappa_settings_staging.json`.)
-
-### Enable CI
-
-`post_deploy` is wired in **`deploy-staging.yml`** and **`deploy.yml`**. After both secrets are set, the next deploy run should pass `post_deploy`. If it fails, check the job log for blueprint or tools sync errors.
 
 ---
 

@@ -299,7 +299,55 @@ This avoids false confidence from local imports on Windows/macOS and catches mis
 
 ## 9) Post-deploy: environment blueprints & per-org provisioning
 
-### 9a) Environment-level blueprint upload (once per deploy, not per tenant)
+### 9a) Automated post-deploy in CI (GitHub Actions)
+
+After a successful Zappa deploy, the **`post_deploy`** job in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) (production) or [`deploy-staging.yml`](.github/workflows/deploy-staging.yml) (staging) runs [`noma_post_deploy_env.py`](../extensions/backend/installer/noma_post_deploy_env.py):
+
+1. Uploads **all** blueprints to `{env}_blueprints`
+2. Validates read-back of `noma_config` and `noma_onboardings`
+3. Syncs tools/actions for each org in the environment (`reset` mode) — orgs are **discovered automatically** from DynamoDB unless an optional override secret is set
+4. Validates `schd_tools` / `schd_actions` counts
+5. **Fails the workflow** if any step fails
+
+**GitHub secrets on `Noma-Travel/system` (optional — subset override only):**
+
+| Secret | When to set | Value |
+|--------|-------------|--------|
+| `DEPLOY_SYNC_ORGS` | Only to limit prod sync to specific orgs | JSON array — see below |
+| `STAGING_SYNC_ORGS` | Only to limit staging sync to specific orgs | Same JSON format |
+
+If these secrets are **unset**, CI passes `--sync-all-orgs` and syncs **every** portfolio/org in that environment's entities table. New orgs are picked up on the next deploy with no config change.
+
+Example override (one org):
+
+```json
+[{"portfolio":"ef8946340127","org":"20b17840d922"}]
+```
+
+Until an environment has at least one org, tools sync is skipped (blueprints still upload).
+
+If `post_deploy` fails, the deployment is marked unsuccessful even though Lambda was updated. Re-run the workflow or run the script locally after fixing the error.
+
+### 9a.1) Deployment failure notifications
+
+On failure of `deploy` or `post_deploy`, the **`notify_failure`** job runs [`.github/workflows/notify-deploy-failure.yml`](.github/workflows/notify-deploy-failure.yml):
+
+1. **Email** the commit author (Resend) when a deliverable address is available
+2. **Slack** message to the team channel webhook
+
+**GitHub secrets (`Noma-Travel/system`, and duplicate on `NOMA` for frontend PR checks):**
+
+| Secret | Purpose |
+|--------|---------|
+| `RESEND_API_KEY` | Resend API (same key as Lambda if desired) |
+| `DEPLOY_ALERT_FROM` | Verified sender, e.g. `Noma Deploy <noreply@travelwithnoma.com>` |
+| `SLACK_DEPLOY_TEAM_WEBHOOK_URL` | Incoming webhook for the team channel (all devs invited) |
+| `USER_EMAIL_MAP` | Optional JSON `{"github_login":"dev@company.com"}` when GitHub hides email (cannot use `GITHUB_` prefix — reserved by GitHub) |
+| `GH_PAT` | Optional — resolve author email via GitHub API when noreply |
+
+Author resolution: push commit author, `repository_dispatch` payload from backend triggers, or PR author for NOMA `e2e.yml`.
+
+### 9b) Environment-level blueprint upload (manual fallback)
 
 After backend deploy, ensure the `noma_config` blueprint exists in DynamoDB so that new-org provisioning can create config documents from it.
 
@@ -324,7 +372,7 @@ Notes:
 - Production websocket in console `.env.production`: use the **wss** URL from API Gateway for your WebSocket ApiId (e.g. `wss://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production` — no trailing slash for NOMA). Align with Lambda `WEBSOCKET_CONNECTIONS` in `zappa_settings.json` if realtime breaks.
 - AWS profile/region for CLI: `noma` / `us-east-1`.
 
-### 9b) Per-org provisioning (automatic on org creation)
+### 9c) Per-org provisioning (automatic on org creation)
 
 When a new org is created via `POST /_auth/orgs/<portfolio_id>`, the backend's `create_org_funnel` automatically runs `NomaOnboardings` which:
 
