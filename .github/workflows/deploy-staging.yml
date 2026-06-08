@@ -27,19 +27,3 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       GH_PAT: ${{ secrets.GH_PAT }}
       ZAPPA_SETTINGS: ${{ secrets.ZAPPA_SETTINGS_STAGING }}
-
-  notify_failure:
-    needs: [deploy]
-    if: ${{ always() && needs.deploy.result == 'failure' }}
-    uses: ./.github/workflows/notify-deploy-failure.yml
-    with:
-      environment_label: staging
-      deploy_result: ${{ needs.deploy.result }}
-      post_deploy_result: skipped
-      secondary_job_label: "post_deploy (deferred)"
-    secrets:
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
-      SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
-      GH_PAT: ${{ secrets.GH_PAT }}
-      USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}
