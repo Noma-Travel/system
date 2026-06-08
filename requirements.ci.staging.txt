@@ -1,0 +1,7 @@
+# CI/CD requirements for staging — installs dependency packages from @staging branches
+# Used by deploy-staging.yml (production uses requirements.ci.txt @main)
+
+git+https://github.com/Noma-Travel/renglo-lib.git@staging#egg=renglo-lib
+git+https://github.com/Noma-Travel/renglo-api.git@staging#egg=renglo-api
+git+https://github.com/Noma-Travel/backend.git@staging#egg=noma-mod&subdirectory=package
+git+https://github.com/Noma-Travel/pes_noma.git@staging#egg=pes-noma-mod&subdirectory=package

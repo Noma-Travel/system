@@ -38,6 +38,7 @@ __pycache__/
 # Local helper/config files
 env_config.py
 zappa_settings.json
+zappa_settings_staging.json
 run.sh
 run.bat
 package-lock.json

@@ -442,12 +442,13 @@ fi
 # Step 8d: Git-installed packages (renglo-*, noma-mod, pes-noma-mod) are stripped from the
 # freeze file and ../dev paths are absent on GitHub Actions. Install them explicitly for CI.
 echo ""
-echo "==> Step 8d: Installing CI git packages from requirements.ci.txt"
-if [[ -f requirements.ci.txt ]]; then
+REQ_CI_FILE="${REQUIREMENTS_CI_FILE:-requirements.ci.txt}"
+echo "==> Step 8d: Installing CI git packages from $REQ_CI_FILE"
+if [[ -f "$REQ_CI_FILE" ]]; then
   if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" == "0" ]]; then
-    "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r requirements.ci.txt
+    "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r "$REQ_CI_FILE"
   else
-    "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r requirements.ci.txt --target "$DEPLOY_SITE" --upgrade
+    "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r "$REQ_CI_FILE" --target "$DEPLOY_SITE" --upgrade
   fi
   echo "    Verifying CI package imports..."
   # find_spec only checks install layout; importing renglo_api runs create_app() and needs Cognito env.
@@ -455,11 +456,11 @@ if [[ -f requirements.ci.txt ]]; then
 for mod in ('renglo_api', 'renglo', 'noma'):
     assert importlib.util.find_spec(mod), mod
 print('    CI packages import OK')" || {
-    echo "ERROR: requirements.ci.txt packages failed to import in deploy venv" >&2
+    echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv" >&2
     exit 1
   }
 else
-  echo "    (skip) requirements.ci.txt not found"
+  echo "    (skip) $REQ_CI_FILE not found"
 fi
 
 # Step 8b: Freeze + --target may install renglo-* from pip's cached wheel (stale vs your working tree).

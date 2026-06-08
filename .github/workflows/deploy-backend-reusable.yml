@@ -1,0 +1,168 @@
+name: Deploy Backend (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      zappa_stage:
+        description: Zappa stage name (e.g. noma_prod, noma_staging)
+        required: true
+        type: string
+      requirements_file:
+        description: pip requirements file relative to system repo root
+        required: true
+        type: string
+      enforce_prod_cors:
+        description: When true, enforce production CORS rules (ALLOW_DEV_ORIGINS must be off)
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      GH_PAT:
+        required: true
+      ZAPPA_SETTINGS:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log deploy context
+        run: |
+          echo "Zappa stage: ${{ inputs.zappa_stage }}"
+          echo "Requirements: ${{ inputs.requirements_file }}"
+          echo "Event: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Triggered by: ${{ github.event.client_payload.triggered_by }}"
+            echo "Source repo: ${{ github.event.client_payload.source_repo }}"
+            echo "Source SHA: ${{ github.event.client_payload.sha }}"
+          fi
+
+      - name: Checkout system repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Configure AWS profile for Zappa
+        run: |
+          mkdir -p ~/.aws
+          echo "[noma]" > ~/.aws/credentials
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "[profile noma]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
+          echo "output = json" >> ~/.aws/config
+
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Create virtual environment and install tools
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install zappa setuptools
+
+      - name: Install application dependencies
+        run: |
+          source venv/bin/activate
+          pip install -r "${{ inputs.requirements_file }}"
+
+      - name: Write zappa_settings.json from secret
+        run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
+
+      - name: Validate Zappa settings for stage
+        env:
+          ZAPPA_STAGE: ${{ inputs.zappa_stage }}
+          ENFORCE_PROD_CORS: ${{ inputs.enforce_prod_cors }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from urllib.parse import urlparse
+
+          stage_name = os.environ["ZAPPA_STAGE"]
+          enforce_prod = os.environ.get("ENFORCE_PROD_CORS", "").lower() in {"1", "true", "yes"}
+
+          with open("zappa_settings.json", "r", encoding="utf-8") as fh:
+              data = json.load(fh)
+
+          stage = data.get(stage_name) or {}
+          if not stage:
+              print(f"ERROR: Stage {stage_name!r} not found in zappa_settings.json")
+              sys.exit(1)
+
+          env = stage.get("environment_variables") or {}
+
+          required = ("FE_BASE_URL", "APP_FE_BASE_URL", "CORS_ALLOWED_ORIGINS")
+          missing = [k for k in required if not str(env.get(k, "")).strip()]
+          if missing:
+              print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
+              sys.exit(1)
+
+          def normalize_origin(value: str) -> str:
+              v = (value or "").strip().rstrip("/")
+              p = urlparse(v)
+              if p.scheme not in ("http", "https") or not p.netloc:
+                  raise ValueError(f"invalid origin: {value!r}")
+              if p.path not in ("", "/"):
+                  raise ValueError(f"origin must not include path: {value!r}")
+              return f"{p.scheme}://{p.netloc}"
+
+          fe_origin = normalize_origin(str(env.get("FE_BASE_URL", "")))
+          app_fe_origin = normalize_origin(str(env.get("APP_FE_BASE_URL", "")))
+          cors_raw = str(env.get("CORS_ALLOWED_ORIGINS", ""))
+          cors_origins = {
+              normalize_origin(part)
+              for part in cors_raw.split(",")
+              if part.strip()
+          }
+          expected = {fe_origin, app_fe_origin}
+          missing_from_cors = sorted(expected - cors_origins)
+          if missing_from_cors:
+              print(
+                  "ERROR: CORS_ALLOWED_ORIGINS must include FE_BASE_URL and APP_FE_BASE_URL. "
+                  f"Missing: {', '.join(missing_from_cors)}"
+              )
+              sys.exit(1)
+
+          if enforce_prod:
+              allow_dev = str(env.get("ALLOW_DEV_ORIGINS", "")).strip().lower()
+              if allow_dev in {"1", "true", "yes", "on"}:
+                  print("ERROR: ALLOW_DEV_ORIGINS must be false/empty in production stage")
+                  sys.exit(1)
+
+          print(f"zappa_settings.json validation OK for stage {stage_name!r}")
+          PY
+
+      - name: Deploy with manual packaging script
+        env:
+          REQUIREMENTS_CI_FILE: ${{ inputs.requirements_file }}
+          ZAPPA_STAGE: ${{ inputs.zappa_stage }}
+        run: |
+          source venv/bin/activate
+          chmod +x ./zappa_update.sh
+          FN="noma-$(echo "$ZAPPA_STAGE" | tr '_' '-')"
+          if aws lambda get-function --function-name "$FN" --region us-east-1 >/dev/null 2>&1; then
+            echo "Lambda $FN exists — running zappa update"
+            ./zappa_update.sh "$ZAPPA_STAGE" update
+          else
+            echo "Lambda $FN not found — running zappa deploy (first-time)"
+            ./zappa_update.sh "$ZAPPA_STAGE" deploy
+          fi

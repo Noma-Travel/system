@@ -1,0 +1,235 @@
+name: Notify Deploy Failure (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment_label:
+        description: Human-readable environment (e.g. production, staging)
+        required: true
+        type: string
+      deploy_result:
+        description: Result of deploy job (success, failure, skipped, etc.)
+        required: true
+        type: string
+      post_deploy_result:
+        description: Result of post_deploy job
+        required: true
+        type: string
+      primary_job_label:
+        description: Label for the first monitored job in failure messages
+        required: false
+        type: string
+        default: deploy (Zappa)
+      secondary_job_label:
+        description: Label for the second monitored job in failure messages
+        required: false
+        type: string
+        default: post_deploy (blueprints/tools)
+    secrets:
+      RESEND_API_KEY:
+        required: false
+      DEPLOY_ALERT_FROM:
+        required: false
+      SLACK_DEPLOY_TEAM_WEBHOOK_URL:
+        required: false
+      GH_PAT:
+        required: false
+      USER_EMAIL_MAP:
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve author and build notification payload
+        id: meta
+        env:
+          DEPLOY_RESULT: ${{ inputs.deploy_result }}
+          POST_DEPLOY_RESULT: ${{ inputs.post_deploy_result }}
+          ENVIRONMENT_LABEL: ${{ inputs.environment_label }}
+          PRIMARY_JOB_LABEL: ${{ inputs.primary_job_label }}
+          SECONDARY_JOB_LABEL: ${{ inputs.secondary_job_label }}
+          USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, "r", encoding="utf-8") as fh:
+              event = json.load(fh)
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          author_email = ""
+          author_login = ""
+          commit_sha = os.environ.get("GITHUB_SHA", "")
+          commit_message = ""
+          source_repo = os.environ.get("GITHUB_REPOSITORY", "")
+
+          if event_name == "repository_dispatch":
+              payload = event.get("client_payload") or {}
+              author_email = str(payload.get("commit_author_email") or "").strip()
+              author_login = str(payload.get("triggered_by") or "").strip()
+              commit_sha = str(payload.get("sha") or commit_sha).strip()
+              commit_message = str(payload.get("commit_message") or "").strip()
+              source_repo = str(payload.get("source_repo") or source_repo).strip()
+          elif event_name == "push":
+              head = event.get("head_commit") or {}
+              author = head.get("author") or {}
+              author_email = str(author.get("email") or "").strip()
+              author_login = str(author.get("username") or "").strip()
+              commit_message = str(head.get("message") or "").strip()
+          elif event_name == "pull_request":
+              user = (event.get("pull_request") or {}).get("user") or {}
+              author_login = str(user.get("login") or "").strip()
+              head = (event.get("pull_request") or {}).get("head") or {}
+              commit_sha = str(head.get("sha") or commit_sha).strip()
+
+          def is_noreply(email: str) -> bool:
+              return not email or "noreply.github.com" in email.lower()
+
+          if is_noreply(author_email) and author_login:
+              mapping_raw = os.environ.get("USER_EMAIL_MAP", "").strip()
+              if mapping_raw:
+                  try:
+                      mapping = json.loads(mapping_raw)
+                      author_email = str(mapping.get(author_login, "")).strip()
+                  except json.JSONDecodeError:
+                      pass
+              if is_noreply(author_email) and os.environ.get("GH_TOKEN"):
+                  try:
+                      req = urllib.request.Request(
+                          f"https://api.github.com/users/{author_login}",
+                          headers={
+                              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                              "Accept": "application/vnd.github+json",
+                              "User-Agent": "noma-deploy-notify",
+                          },
+                      )
+                      with urllib.request.urlopen(req, timeout=20) as resp:
+                          data = json.loads(resp.read().decode("utf-8"))
+                      author_email = str(data.get("email") or "").strip()
+                  except Exception as exc:
+                      print(f"Could not resolve email via GitHub API: {exc}")
+
+          deploy_result = os.environ.get("DEPLOY_RESULT", "")
+          post_result = os.environ.get("POST_DEPLOY_RESULT", "")
+          primary_label = os.environ.get("PRIMARY_JOB_LABEL", "deploy")
+          secondary_label = os.environ.get("SECONDARY_JOB_LABEL", "post_deploy")
+          failed_parts = []
+          if deploy_result == "failure":
+              failed_parts.append(primary_label)
+          if post_result == "failure":
+              failed_parts.append(secondary_label)
+          failed_summary = ", ".join(failed_parts) or "unknown step"
+
+          run_url = (
+              f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
+              f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+          )
+          env_label = os.environ.get("ENVIRONMENT_LABEL", "unknown")
+          workflow = os.environ.get("GITHUB_WORKFLOW", "workflow")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          ref = os.environ.get("GITHUB_REF_NAME", "")
+
+          subject = f"[FAILED] {env_label} deploy — {repo}@{ref}"
+          body_lines = [
+              f"Deployment failed in {env_label}.",
+              f"Workflow: {workflow}",
+              f"Repository: {repo}",
+              f"Branch/ref: {ref}",
+              f"Failed step(s): {failed_summary}",
+              f"Author: {author_login or 'unknown'}",
+              f"Commit: {commit_sha[:12] if commit_sha else 'n/a'}",
+              f"Message: {commit_message[:500] if commit_message else 'n/a'}",
+              f"Source repo: {source_repo}",
+              f"Run: {run_url}",
+          ]
+          body_text = "\n".join(body_lines)
+
+          slack_text = (
+              f":x: *{env_label} deploy failed* — `{repo}` (`{ref}`)\n"
+              f"*Failed:* {failed_summary}\n"
+              f"*Author:* {author_login or 'unknown'}"
+              + (f" ({author_email})" if author_email and not is_noreply(author_email) else "")
+              + f"\n*Commit:* `{commit_sha[:12] if commit_sha else 'n/a'}`"
+              + (f" — {commit_message[:200]}" if commit_message else "")
+              + f"\n<{run_url}|View GitHub Actions run>"
+          )
+
+          out = os.environ.get("GITHUB_OUTPUT")
+          with open(out, "a", encoding="utf-8") as fh:
+              fh.write(f"author_email={author_email}\n")
+              fh.write(f"author_login={author_login}\n")
+              fh.write(f"subject<<EOF\n{subject}\nEOF\n")
+              fh.write(f"body<<EOF\n{body_text}\nEOF\n")
+              fh.write(f"slack_text<<EOF\n{slack_text}\nEOF\n")
+              fh.write(f"has_deliverable_email={'true' if author_email and not is_noreply(author_email) else 'false'}\n")
+
+          print(body_text)
+          PY
+
+      - name: Email commit author (Resend)
+        if: steps.meta.outputs.has_deliverable_email == 'true' && secrets.RESEND_API_KEY != '' && secrets.DEPLOY_ALERT_FROM != ''
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
+          AUTHOR_EMAIL: ${{ steps.meta.outputs.author_email }}
+          SUBJECT: ${{ steps.meta.outputs.subject }}
+          BODY: ${{ steps.meta.outputs.body }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          payload = {
+              "from": os.environ["DEPLOY_ALERT_FROM"],
+              "to": [os.environ["AUTHOR_EMAIL"]],
+              "subject": os.environ["SUBJECT"],
+              "text": os.environ["BODY"],
+          }
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(
+              "https://api.resend.com/emails",
+              data=data,
+              headers={
+                  "Authorization": f"Bearer {os.environ['RESEND_API_KEY']}",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              print(resp.read().decode("utf-8"))
+          PY
+
+      - name: Warn when author email unavailable
+        if: steps.meta.outputs.has_deliverable_email != 'true'
+        run: |
+          echo "No deliverable author email; skipping Resend. Team Slack alert will still be sent if configured."
+
+      - name: Notify team Slack channel
+        if: secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL != ''
+        env:
+          SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
+          SLACK_TEXT: ${{ steps.meta.outputs.slack_text }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          payload = {"text": os.environ["SLACK_TEXT"]}
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(
+              os.environ["SLACK_DEPLOY_TEAM_WEBHOOK_URL"],
+              data=data,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              print(f"Slack response: {resp.status}")
+          PY
