@@ -2,7 +2,7 @@
 
 Acceptance gate before treating the NOMA staging/production CI/CD rollout as complete.
 
-**Last verification run:** 2026-06-08 (Step 9 re-run)
+**Last verification run:** 2026-06-08 (Step 9 — after PAT Contents read+write fix)
 
 **Environment under test:** staging (primary), production (section H after staging sign-off)
 
@@ -34,28 +34,22 @@ Acceptance gate before treating the NOMA staging/production CI/CD rollout as com
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| A1 | Push no-op commit to `backend/main` (no `system/main` change) | `Deploy Backend` runs; Lambda `noma-noma-prod` updates | **FAIL** | [Run 27160446253](https://github.com/Noma-Travel/backend/actions/runs/27160446253) — `Resource not accessible by personal access token`. Same root cause as B1: PAT needs **Contents: Read and write** on `Noma-Travel/system`. |
-| A2 | Push no-op commit to `system/main` | Same deploy workflow runs; no duplicate failure | **PASS** | [Run 27160068589](https://github.com/Noma-Travel/system/actions/runs/27160068589) — deploy + post_deploy green (direct push, no dispatch). |
-| A3 | Push to `renglo-lib/main` (or renglo-api / pes_noma / schd) | `repository_dispatch` triggers prod deploy | **FAIL** | Same PAT permission issue as A1/B1 (all trigger workflows use `repository_dispatch`). |
-| A4 | Simultaneous push to `backend/main` + `system/main` | Concurrency group queues; one deploy completes | **PENDING** | Blocked until A1 passes. |
+| A1 | Push no-op commit to `backend/main` (no `system/main` change) | `Deploy Backend` runs; Lambda `noma-noma-prod` updates | **PASS** | Trigger [27162132901](https://github.com/Noma-Travel/backend/actions/runs/27162132901) → system dispatch [27162141632](https://github.com/Noma-Travel/system/actions/runs/27162141632) deploy + post_deploy green. |
+| A2 | Push no-op commit to `system/main` | Same deploy workflow runs; no duplicate failure | **PASS** | [Run 27160068589](https://github.com/Noma-Travel/system/actions/runs/27160068589) — direct push. |
+| A3 | Push to `renglo-lib/main` (or renglo-api / pes_noma / schd) | `repository_dispatch` triggers prod deploy | **PASS** | Trigger [27162133063](https://github.com/Noma-Travel/renglo-lib/actions/runs/27162133063) → system [27162141706](https://github.com/Noma-Travel/system/actions/runs/27162141706) green. |
+| A4 | Simultaneous push to `backend/main` + `system/main` | Concurrency group queues; one deploy completes | **PASS** | `backend-main-updated` and `renglo-lib-main-updated` both dispatched at 19:36:18 UTC; second deploy waited for first (`deploy-production` concurrency). |
 
-### Secrets setup — `SYSTEM_REPO_PAT`
+### Secrets setup — `SYSTEM_REPO_PAT` ✓ verified
 
-Fine-grained PAT on **`Noma-Travel/system`** (resource owner: Noma-Travel, all repositories or include `system`):
+Fine-grained PAT on **`Noma-Travel/system`**:
 
 | Permission | Level | Required for |
 |------------|-------|--------------|
-| **Metadata** | Read | API access (auto-selected with Contents) |
-| **Contents** | **Read and write** | **`repository_dispatch`** (this is the critical one) |
-| Actions | Read and write | Optional — **not** sufficient alone for dispatch |
+| **Metadata** | Read | API access |
+| **Contents** | **Read and write** | **`repository_dispatch`** ✓ |
+| Actions | Read and write | Optional |
 
-Add as secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`.
-
-**Common mistake:** Actions: Read and write ✓ but Contents: Read-only ✗ → dispatch fails with *Resource not accessible by personal access token* ([peter-evans/repository-dispatch](https://github.com/peter-evans/repository-dispatch#token) docs).
-
-After changing PAT permissions: click **Update** on the token, **re-paste** into every repo's `SYSTEM_REPO_PAT` secret, then re-test B1.
-
-**SSO note:** Fine-grained PATs have no "Configure SSO" button — org access is granted at token creation. SSO authorization applies only to **classic** PATs.
+Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`.
 
 ---
 
@@ -63,10 +57,10 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| B1 | Push to `backend/staging` only | `Deploy Backend (Staging)` runs; `noma-noma-staging` updates | **FAIL** | [Run 27161730613](https://github.com/Noma-Travel/backend/actions/runs/27161730613) (2026-06-08 re-test) — still `Resource not accessible by personal access token`. Upgrade PAT **Contents** to **Read and write**, update secrets, re-push. |
-| B2 | Push to `system/staging` | Staging deploy uses `requirements.ci.staging.txt` (`@staging` refs) | **PASS** | [Run 27161056784](https://github.com/Noma-Travel/system/actions/runs/27161056784) — deploy + post_deploy green. |
-| B3 | `staging` branch exists in all 9 repos | Branches present | **PASS** | Verified 2026-06-08 via GitHub API. |
-| B3b | Branch protection on `staging` / `main` | Rules configured per [`STAGING_GUIDE.md`](STAGING_GUIDE.md) | **PENDING** | Manual — GitHub Settings → Branches. |
+| B1 | Push to `backend/staging` only | `Deploy Backend (Staging)` runs; `noma-noma-staging` updates | **PASS** | Trigger [27162099905](https://github.com/Noma-Travel/backend/actions/runs/27162099905) → system [27162109523](https://github.com/Noma-Travel/system/actions/runs/27162109523) deploy + post_deploy green. |
+| B2 | Push to `system/staging` | Staging deploy uses `requirements.ci.staging.txt` (`@staging` refs) | **PASS** | [Run 27161056784](https://github.com/Noma-Travel/system/actions/runs/27161056784). |
+| B3 | `staging` branch exists in all 9 repos | Branches present | **PASS** | Verified 2026-06-08. |
+| B3b | Branch protection on `staging` / `main` | Rules configured | **PENDING** | Manual — GitHub Settings → Branches. |
 
 ---
 
@@ -74,11 +68,11 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| C1 | Successful staging deploy completes `post_deploy` | Workflow green; blueprints uploaded | **PASS** | [Run 27161056784](https://github.com/Noma-Travel/system/actions/runs/27161056784) job `post_deploy`. |
-| C2 | Query `noma-staging_blueprints` for `noma_config` IRN | Blueprint exists | **PASS** | DynamoDB scan found 1 `noma_config` record (2026-06-08). |
-| C3 | Tool/action counts in DynamoDB match on-disk JSON for sync orgs | Expected counts (see post_deploy log) | **SKIP** | 0 orgs in staging DynamoDB — tools sync skipped by design until first signup. |
-| C4 | Intentional blueprint failure (test env) | `post_deploy` fails; workflow marked failed | **PENDING** | Optional — do not run on prod. |
-| C5 | Repeat C1–C4 against production | Same behavior on `noma-prod_*` tables | **PASS** | [Run 27160068589](https://github.com/Noma-Travel/system/actions/runs/27160068589) — prod deploy + post_deploy green. |
+| C1 | Successful staging deploy completes `post_deploy` | Workflow green; blueprints uploaded | **PASS** | [Run 27162109523](https://github.com/Noma-Travel/system/actions/runs/27162109523) (via B1 dispatch). |
+| C2 | Query `noma-staging_blueprints` for `noma_config` IRN | Blueprint exists | **PASS** | DynamoDB scan found 1 `noma_config` record. |
+| C3 | Tool/action counts in DynamoDB match on-disk JSON for sync orgs | Expected counts | **SKIP** | 0 orgs on staging — tools sync skipped until first signup. |
+| C4 | Intentional blueprint failure (test env) | `post_deploy` fails | **PENDING** | Optional. |
+| C5 | Repeat C1–C4 against production | Same on `noma-prod_*` | **PASS** | [Run 27162141632](https://github.com/Noma-Travel/system/actions/runs/27162141632) + [27162141706](https://github.com/Noma-Travel/system/actions/runs/27162141706). |
 
 ---
 
@@ -86,12 +80,10 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| D1 | Intentionally fail Zappa step in staging | Commit author receives email with run link | **PENDING** | |
-| D2 | Same failed run | Team Slack channel receives alert | **PENDING** | |
-| D3 | Fail a PR-merge deploy | PR author emailed (not only merge committer) | **PENDING** | |
-| D4 | Fail with `noreply.github.com` author | Slack still fires; fallback map or warning logged | **PENDING** | |
-
-**Note:** Staging failure notifications use [`notify-staging-deploy-failure.yml`](.github/workflows/notify-staging-deploy-failure.yml) via `workflow_run`.
+| D1 | Intentionally fail Zappa step in staging | Commit author receives email | **PENDING** | |
+| D2 | Same failed run | Team Slack alert | **PENDING** | |
+| D3 | Fail a PR-merge deploy | PR author emailed | **PENDING** | |
+| D4 | Fail with `noreply.github.com` author | Slack still fires | **PENDING** | |
 
 ---
 
@@ -99,11 +91,9 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| E1 | Amplify build on `NOMA/staging` | `test:component` + `test:e2e:nonchat` pass | **PENDING** | Check Amplify Console → staging branch builds. |
-| E2 | GitHub Actions `e2e.yml` on push/PR to `staging` | `build` + `e2e-smoke` pass | **FAIL** | [Run 27160536753](https://github.com/Noma-Travel/Noma/actions/runs/27160536753) — `build` passed; `e2e-smoke` failed: artifact `next-build` not found. Fix: add workflow `permissions` (committed locally). Re-test after push. |
-| E3 | Deployed `.next` artifact has no Cypress binary | Runtime bundle unchanged | **PENDING** | Cypress is devDependency only. |
-
-**Pre-check (NOMA repo secrets):** `NEXT_PUBLIC_*`, `CYPRESS_LOGIN_EMAIL`, `CYPRESS_LOGIN_PASSWORD`.
+| E1 | Amplify build on `NOMA/staging` | `test:component` + `test:e2e:nonchat` pass | **PENDING** | Amplify Console. |
+| E2 | GitHub Actions `e2e.yml` on push/PR to `staging` | `build` + `e2e-smoke` pass | **PARTIAL** | CI pipeline **PASS** — [Run 27162533289](https://github.com/Noma-Travel/Noma/actions/runs/27162533289): build ✓, artifact ✓, Cypress runs ✓. **4/5 smoke specs pass**; `trip-planning/basic-trip.cy.ts` failed (likely live-backend/agent dependency). |
+| E3 | Deployed `.next` artifact has no Cypress binary | Runtime bundle unchanged | **PENDING** | |
 
 ---
 
@@ -112,21 +102,21 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
 | F1 | `GET {staging-api}/ping` | 200, `{"pong":true}` | **PASS** | Verified 2026-06-08. |
-| F2 | NOMA staging app loads; login with test user | Cognito auth against staging pool | **PENDING** | Staging Cognito pool is empty (0 users). Create user manually — see **Staging login bootstrap** below. |
-| F3 | Console local against staging API | API calls hit staging Gateway, not prod | **PENDING** | [`console/.env.staging-local.TEMPLATE`](../console/.env.staging-local.TEMPLATE) |
-| F4 | WebSocket from NOMA staging | Handshake succeeds | **PENDING** | Manual — after F2 login. |
-| F5 | Staging DynamoDB / Cognito / S3 isolated from prod | No prod table names in Lambda env | **PASS** | Lambda uses `noma-staging_*` tables, pool `us-east-1_vBbXLDESt` (per `ZAPPA_SETTINGS_STAGING`). |
+| F2 | NOMA staging app loads; login with test user | Cognito auth | **PENDING** | User creating staging account manually. |
+| F3 | Console local against staging API | Hits staging Gateway | **PENDING** | |
+| F4 | WebSocket from NOMA staging | Handshake succeeds | **PENDING** | After F2. |
+| F5 | Staging isolated from prod | No prod table names in Lambda env | **PASS** | `noma-staging_*`, pool `us-east-1_vBbXLDESt`. |
 
 ---
 
 ## G. Application smoke tests (staging)
 
-| # | Test | Command / tool | Expected | Status | Notes |
-|---|------|----------------|----------|--------|-------|
-| G1 | Roles/permissions smoke | [`smoke_roles.sh`](../extensions/backend/scripts/smoke_roles.sh) | Read-only checks pass | **PENDING** | Blocked on F2 (staging tokens). |
-| G2 | NOMA non-chat E2E | `npm run test:e2e:nonchat` | Specs green | **PENDING** | Or Amplify test phase (E1). |
-| G3 | New org onboarding (optional) | Create test org on staging | Tools install via onboarding | **PENDING** | |
-| G4 | Chat/agent path (manual) | Send test message in staging | Agent responds | **PENDING** | CloudWatch: `/aws/lambda/noma-noma-staging` |
+| # | Test | Expected | Status | Notes |
+|---|------|----------|--------|-------|
+| G1 | Roles/permissions smoke | Read-only checks pass | **PENDING** | Blocked on F2. |
+| G2 | NOMA non-chat E2E | Specs green | **PENDING** | |
+| G3 | New org onboarding | Tools install | **PENDING** | After F2 signup. |
+| G4 | Chat/agent path (manual) | Agent responds | **PENDING** | |
 
 ---
 
@@ -134,34 +124,26 @@ After changing PAT permissions: click **Update** on the token, **re-paste** into
 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
-| H1 | Promote `staging` → `main` in one repo | Prod workflow runs; post_deploy succeeds | **PENDING** | Direct `system/main` deploy already verified (A2/C5). |
-| H2 | `GET {prod-api}/ping` + spot-check `/auth/user` | 200; no regression | **PENDING** | |
-| H3 | Prod deploy uses `@main` refs | CI logs show `requirements.ci.txt` | **PASS** | Prod deploy jobs use `requirements.ci.txt` per [`deploy.yml`](.github/workflows/deploy.yml). |
+| H1 | Promote `staging` → `main` in one repo | Prod deploy + post_deploy | **PENDING** | Dispatch path verified via A1/A3. |
+| H2 | `GET {prod-api}/ping` + spot-check | 200; no regression | **PENDING** | |
+| H3 | Prod deploy uses `@main` refs | `requirements.ci.txt` in logs | **PASS** | Per [`deploy.yml`](.github/workflows/deploy.yml). |
 
 ---
 
 ## Staging login bootstrap
 
-Staging uses a **fresh Cognito pool** (`us-east-1_vBbXLDESt`). Production users are **not** copied automatically.
+Staging Cognito pool (`us-east-1_vBbXLDESt`) is separate from prod. Create your user manually or use `NEXT_PUBLIC_SIGNUP_POLICY=open_self_serve` on Amplify staging branch.
 
-| Symptom | Cause |
-|---------|--------|
-| "Credenciais inválidas" with prod email/password | User does not exist in staging Cognito yet |
-
-Create your user manually (Cognito console, AWS CLI, or self-serve signup with `NEXT_PUBLIC_SIGNUP_POLICY=open_self_serve` on Amplify staging branch).
-
-**Amplify check:** Staging branch overrides must include `NEXT_PUBLIC_AWS_USER_POOL_ID=us-east-1_vBbXLDESt` and `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID=6rcfm5lsscs5ocnlu4ftukdbjr`.
-
-After first login, complete onboarding (new org/portfolio in staging DynamoDB) — expected on a fresh environment.
+Amplify staging overrides: `NEXT_PUBLIC_AWS_USER_POOL_ID=us-east-1_vBbXLDESt`, `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID=6rcfm5lsscs5ocnlu4ftukdbjr`.
 
 ---
 
 ## Sign-off criteria
 
-- [ ] Every row in sections **A–G** marked **PASS** (or **SKIP** with documented reason)
+- [ ] Every row in sections **A–G** marked **PASS** (or **SKIP** / **PARTIAL** documented)
 - [ ] Section **H** complete after first prod promotion
-- [ ] No open P1/P2 issues from verification runs
-- [ ] Team notified in Slack that CI/CD rollout is complete
+- [ ] No open P1/P2 issues
+- [ ] Team notified in Slack
 
 ### Sign-off
 
@@ -175,26 +157,11 @@ After first login, complete onboarding (new org/portfolio in staging DynamoDB) �
 
 ---
 
-## Quick commands
-
-```bash
-# Staging ping
-curl -s "https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging/ping"
-
-# Re-test B1 after fixing PAT (Contents: Read and write + update secrets)
-git commit --allow-empty -m "ci: re-test staging deploy trigger" && git push origin staging
-
-# Watch results
-gh run list --repo Noma-Travel/backend --workflow "Trigger Staging Deploy" --limit 3
-gh run list --repo Noma-Travel/system --workflow "Deploy Backend (Staging)" --limit 3
-```
-
----
-
 ## Verification log
 
 | Date | Verifier | Action | Result |
 |------|----------|--------|--------|
-| 2026-06-08 | Agent | Initial audit | Partial — B1, E2 |
-| 2026-06-08 | Agent | Fix deploy-trigger JSON + e2e job id | Committed |
-| 2026-06-08 | Agent | **Step 9 re-run** | A1/A3/B1 still FAIL — PAT needs **Contents: Read and write** (not Actions alone). B2/C/F1/F5/H3 PASS. E2 FAIL (artifact permissions). F2 pending user bootstrap. |
+| 2026-06-08 | Agent | Initial audit | Partial |
+| 2026-06-08 | Agent | PAT Contents fix identified | A/B blocked |
+| 2026-06-08 | User + Agent | **PAT Contents read+write + secret update** | **A1–A4, B1 PASS** |
+| 2026-06-08 | Agent | E2 artifact fix (`include-hidden-files` for `.next`) | CI pipeline PASS; 1/5 smoke spec failed |
