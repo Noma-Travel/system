@@ -11,7 +11,7 @@ This document describes the **`staging` branch** strategy across the NOMA stack.
 | `renglo-lib` | [Noma-Travel/renglo-lib](https://github.com/Noma-Travel/renglo-lib) | Lambda dependency (`@staging`) |
 | `renglo-api` | [Noma-Travel/renglo-api](https://github.com/Noma-Travel/renglo-api) | Lambda dependency (`@staging`) |
 | `system` | [Noma-Travel/system](https://github.com/Noma-Travel/system) | Zappa deploy orchestrator |
-| `console` | [Noma-Travel/console](https://github.com/Noma-Travel/console) | Admin console frontend |
+| `console` | [Noma-Travel/console](https://github.com/Noma-Travel/console) | Local dev admin UI (not Amplify-deployed) |
 | `backend` | [Noma-Travel/backend](https://github.com/Noma-Travel/backend) | Handlers package (`@staging`) |
 | `NOMA` | [Noma-Travel/Noma](https://github.com/Noma-Travel/Noma) | App frontend (Amplify `staging`) |
 | `pes_noma` | [Noma-Travel/pes_noma](https://github.com/Noma-Travel/pes_noma) | Lambda dependency (`@staging`) |
@@ -139,17 +139,79 @@ Launcher (`deploy_environment.py noma-staging`) created:
 | Backend `WEBSOCKET_CONNECTIONS` | `https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
 | NOMA Amplify staging | `https://staging.d1uvu3pkmkr1l6.amplifyapp.com` (branch overrides in Amplify Console) |
 
-**Still pending:** Console Amplify `staging` branch + branch overrides, Step 7c post-deploy org sync.
+**Console (`console` repo):** local developer tool only — run with `npm run dev` and `.env.development` / `.env.production` pointing at the API you are debugging. **Not** deployed via Amplify (no staging branch or app).
+
+**Step 7c (post-deploy org sync):** configure `DEPLOY_SYNC_ORGS` / `STAGING_SYNC_ORGS` secrets — see below.
 
 See also [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for production deploy flow.
 
 ---
 
-## Step 8 — Frontend staging (NOMA + Console)
+## Step 7c — Post-deploy org sync secrets
 
-### NOMA (Amplify) — done when branch `staging` is connected with overrides
+After each Zappa deploy, **`post_deploy`** uploads all blueprints and syncs `schd_tools` / `schd_actions` for configured orgs. Without these secrets, `post_deploy` fails (by design).
 
-Same Amplify app as production; **branch-specific** env vars (not a second app). Override on branch `staging`:
+### GitHub secrets (`Noma-Travel/system` → Settings → Secrets)
+
+| Secret | Environment | When to set |
+|--------|-------------|-------------|
+| `DEPLOY_SYNC_ORGS` | Production | After you confirm prod portfolio + org IDs |
+| `STAGING_SYNC_ORGS` | Staging | After you create a test tenant in staging |
+
+**Format** (JSON array, one line):
+
+```json
+[{"portfolio":"<12-char-portfolio-id>","org":"<12-char-org-id>"}]
+```
+
+Multiple orgs:
+
+```json
+[{"portfolio":"PORT_A","org":"ORG_A"},{"portfolio":"PORT_B","org":"ORG_B"}]
+```
+
+### Production — find `DEPLOY_SYNC_ORGS` values
+
+1. Log into **production** NOMA (`app.travelwithnoma.com` or prod Amplify URL).
+2. Open DevTools → **Network**.
+3. Trigger any API call (e.g. load dashboard).
+4. Find a request to `/_data/`, `/_chat/`, or `/_auth/tree`.
+5. Copy **`portfolio`** and **`org`** from request headers (`X-Portfolio-Id`, `X-Org-Id`) or URL path.
+
+Historical dev IDs in `NOMA/.env.local` comments are **not** trusted — verify against live prod.
+
+### Staging — seed a test tenant, then set `STAGING_SYNC_ORGS`
+
+1. Open **staging NOMA**: `https://staging.d1uvu3pkmkr1l6.amplifyapp.com`
+2. **Sign up** or **invite** a test user (staging Cognito pool `us-east-1_vBbXLDESt`).
+3. Complete onboarding so a portfolio + org exist.
+4. Copy portfolio/org IDs from Network tab (same as prod steps above).
+5. Add secret **`STAGING_SYNC_ORGS`** with those IDs.
+
+Optional local repair for one org:
+
+```bash
+python C:/Noma/extensions/backend/installer/noma_post_deploy_org.py ^
+  --env-file C:/Noma/system/post_deploy.env ^
+  --env-name noma-staging ^
+  --aws-profile noma ^
+  --aws-region us-east-1 ^
+  --portfolio <ID> ^
+  --org <ID> ^
+  --tools-mode reset
+```
+
+(Export staging Lambda env vars to `post_deploy.env` first, or use values from `zappa_settings_staging.json`.)
+
+### Enable CI
+
+`post_deploy` is wired in **`deploy-staging.yml`** and **`deploy.yml`**. After both secrets are set, the next deploy run should pass `post_deploy`. If it fails, check the job log for blueprint or tools sync errors.
+
+---
+
+## Step 8 — NOMA frontend staging (Amplify)
+
+Same Amplify app as production; **branch-specific** env vars on branch `staging` (not a second app):
 
 | Variable | Staging value |
 |----------|---------------|
@@ -162,22 +224,7 @@ Same Amplify app as production; **branch-specific** env vars (not a second app).
 
 Prod values stay on **All branches** / `main`.
 
-### Console (Amplify) — connect `staging` branch
-
-The **`wss` repo is local-dev only**; production/staging realtime uses **API Gateway WebSocket** (created above), not the Python `wss` service.
-
-1. Connect GitHub branch **`staging`** on the Console Amplify app (or create app for `Noma-Travel/console`).
-2. Build spec: [`console/amplify.yml`](https://github.com/Noma-Travel/console/blob/staging/amplify.yml) (`npm run build` → `dist/`).
-3. Set **staging branch overrides** (see [`console/.env.staging.TEMPLATE`](https://github.com/Noma-Travel/console/blob/staging/.env.staging.TEMPLATE)):
-   - `VITE_API_URL` → staging REST API (same as NOMA)
-   - `VITE_WEBSOCKET_URL` → `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production`
-   - `VITE_COGNITO_*` → staging Cognito IDs
-4. If the console staging URL differs from NOMA, add it to `CORS_ALLOWED_ORIGINS` in `zappa_settings_staging.json` and refresh **`ZAPPA_SETTINGS_STAGING`**.
-
-### After WebSocket URL is in `zappa_settings_staging.json`
-
-1. Paste updated JSON into GitHub secret **`ZAPPA_SETTINGS_STAGING`**.
-2. Push to **`system` `staging`** (or re-run **Deploy Backend (Staging)**) to redeploy Lambda with `WEBSOCKET_CONNECTIONS`.
+**WebSocket note:** the `wss` repo is a **local dev emulator** only. Staging/production chat uses API Gateway WebSocket (`1qefn6vt95`), not a deployed `wss` service.
 
 ---
 
@@ -243,4 +290,4 @@ sequenceDiagram
 | 2026-06-08 | Added `zappa_settings_staging.json` template for `ZAPPA_SETTINGS_STAGING` secret |
 | 2026-06-08 | First `deploy-staging.yml` CI deploy; Lambda `noma-noma-staging` live |
 | 2026-06-08 | Staging WebSocket API `noma_staging_websocket` (`1qefn6vt95`); NOMA Amplify staging connected |
-| 2026-06-08 | Console `amplify.yml` + staging env template; failure notifications re-enabled on staging deploy |
+| 2026-06-08 | Step 7c: post_deploy enabled; DEPLOY_SYNC_ORGS / STAGING_SYNC_ORGS documented |
