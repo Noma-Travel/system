@@ -133,9 +133,51 @@ Launcher (`deploy_environment.py noma-staging`) created:
 | S3 bucket | `noma-staging-42067270` |
 | System blueprints | 4 uploaded to `noma-staging_blueprints` |
 
-**Still pending:** Zappa stage `noma_staging` (first deploy), `API_GATEWAY_ARN`, Amplify `staging` branch config, WebSocket staging URL.
+| Zappa Lambda | `noma-noma-staging` |
+| REST API | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
+| WebSocket API | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
+| Backend `WEBSOCKET_CONNECTIONS` | `https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
+| NOMA Amplify staging | `https://staging.d1uvu3pkmkr1l6.amplifyapp.com` (branch overrides in Amplify Console) |
+
+**Still pending:** Console Amplify `staging` branch + branch overrides, Step 7c post-deploy org sync.
 
 See also [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for production deploy flow.
+
+---
+
+## Step 8 — Frontend staging (NOMA + Console)
+
+### NOMA (Amplify) — done when branch `staging` is connected with overrides
+
+Same Amplify app as production; **branch-specific** env vars (not a second app). Override on branch `staging`:
+
+| Variable | Staging value |
+|----------|---------------|
+| `NEXT_PUBLIC_API_BASE_URL` | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
+| `NEXT_PUBLIC_VITE_API_URL` | same |
+| `NEXT_PUBLIC_AWS_USER_POOL_ID` | `us-east-1_vBbXLDESt` |
+| `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID` | `6rcfm5lsscs5ocnlu4ftukdbjr` |
+| `NEXT_PUBLIC_VITE_COGNITO_*` | same Cognito IDs |
+| `NEXT_PUBLIC_CHAT_WS` | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
+
+Prod values stay on **All branches** / `main`.
+
+### Console (Amplify) — connect `staging` branch
+
+The **`wss` repo is local-dev only**; production/staging realtime uses **API Gateway WebSocket** (created above), not the Python `wss` service.
+
+1. Connect GitHub branch **`staging`** on the Console Amplify app (or create app for `Noma-Travel/console`).
+2. Build spec: [`console/amplify.yml`](https://github.com/Noma-Travel/console/blob/staging/amplify.yml) (`npm run build` → `dist/`).
+3. Set **staging branch overrides** (see [`console/.env.staging.TEMPLATE`](https://github.com/Noma-Travel/console/blob/staging/.env.staging.TEMPLATE)):
+   - `VITE_API_URL` → staging REST API (same as NOMA)
+   - `VITE_WEBSOCKET_URL` → `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production`
+   - `VITE_COGNITO_*` → staging Cognito IDs
+4. If the console staging URL differs from NOMA, add it to `CORS_ALLOWED_ORIGINS` in `zappa_settings_staging.json` and refresh **`ZAPPA_SETTINGS_STAGING`**.
+
+### After WebSocket URL is in `zappa_settings_staging.json`
+
+1. Paste updated JSON into GitHub secret **`ZAPPA_SETTINGS_STAGING`**.
+2. Push to **`system` `staging`** (or re-run **Deploy Backend (Staging)**) to redeploy Lambda with `WEBSOCKET_CONNECTIONS`.
 
 ---
 
@@ -154,15 +196,13 @@ done
 
 **When:** After launcher (done) and before first staging deploy test. Template file: **`zappa_settings_staging.json`** (gitignored, filled locally).
 
-**Action:** Copy the entire JSON from `zappa_settings_staging.json` into GitHub secret **`ZAPPA_SETTINGS_STAGING`** on `Noma-Travel/system` (Settings → Secrets and variables → Actions → New repository secret).
+**Action:** Refresh GitHub secret **`ZAPPA_SETTINGS_STAGING`** whenever `zappa_settings_staging.json` changes locally.
 
-**Still empty until first deploy:**
-
-| Field | Fill when |
-|-------|-----------|
-| `API_GATEWAY_ARN` | After first `deploy-staging.yml` run creates the staging API Gateway |
-| `BASE_URL` / `DOC_BASE_URL` | Same — staging API URL from Zappa output |
-| `WEBSOCKET_CONNECTIONS` | When `wss` staging is deployed (Step 8) |
+| Field | Staging value |
+|-------|---------------|
+| `API_GATEWAY_ARN` | `arn:aws:execute-api:us-east-1:158711196499:2r4dlx8qdj` |
+| `BASE_URL` / `DOC_BASE_URL` | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
+| `WEBSOCKET_CONNECTIONS` | `https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
 
 Update `FE_BASE_URL` / `CORS_ALLOWED_ORIGINS` if your NOMA Amplify staging URL differs from `staging.d1uvu3pkmkr1l6.amplifyapp.com`.
 
@@ -201,4 +241,6 @@ sequenceDiagram
 | 2026-06-08 | Created `staging` branch on all 9 stack repos from `main` |
 | 2026-06-08 | Added `deploy-staging.yml`, `requirements.ci.staging.txt`, and cross-repo dispatch triggers |
 | 2026-06-08 | Added `zappa_settings_staging.json` template for `ZAPPA_SETTINGS_STAGING` secret |
-| 2026-06-08 | Ran launcher `noma-staging`; DynamoDB, Cognito, IAM, S3, blueprints provisioned |
+| 2026-06-08 | First `deploy-staging.yml` CI deploy; Lambda `noma-noma-staging` live |
+| 2026-06-08 | Staging WebSocket API `noma_staging_websocket` (`1qefn6vt95`); NOMA Amplify staging connected |
+| 2026-06-08 | Console `amplify.yml` + staging env template; failure notifications re-enabled on staging deploy |
