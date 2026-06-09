@@ -217,6 +217,7 @@ jobs:
               headers={
                   "Authorization": f"Bearer {os.environ['RESEND_API_KEY']}",
                   "Content-Type": "application/json",
+                  "User-Agent": "noma-deploy-notify/1.0 (github-actions)",
               },
               method="POST",
           )
@@ -253,7 +254,10 @@ jobs:
           req = urllib.request.Request(
               os.environ["SLACK_DEPLOY_TEAM_WEBHOOK_URL"],
               data=data,
-              headers={"Content-Type": "application/json"},
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "noma-deploy-notify/1.0 (github-actions)",
+              },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=30) as resp:
