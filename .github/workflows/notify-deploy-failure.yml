@@ -97,6 +97,7 @@ jobs:
               commit_sha = str(wr.get("head_sha") or commit_sha).strip()
               commit_message = str(head.get("message") or "").strip()
               run_url = str(wr.get("html_url") or "").strip()
+              wr_repo = str(wr.get("repository", {}).get("full_name") or source_repo).strip()
 
           def is_noreply(email: str) -> bool:
               return not email or "noreply.github.com" in email.lower()
@@ -124,6 +125,30 @@ jobs:
                       author_email = str(data.get("email") or "").strip()
                   except Exception as exc:
                       print(f"Could not resolve email via GitHub API: {exc}")
+
+          # workflow_run head_commit often lacks username (e.g. squash merges); fetch commit metadata.
+          if event_name == "workflow_run" and os.environ.get("GH_TOKEN") and commit_sha:
+              repo_for_commit = locals().get("wr_repo") or source_repo
+              if repo_for_commit:
+                  try:
+                      req = urllib.request.Request(
+                          f"https://api.github.com/repos/{repo_for_commit}/commits/{commit_sha}",
+                          headers={
+                              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                              "Accept": "application/vnd.github+json",
+                              "User-Agent": "noma-deploy-notify",
+                          },
+                      )
+                      with urllib.request.urlopen(req, timeout=20) as resp:
+                          commit_data = json.loads(resp.read().decode("utf-8"))
+                      gh_author = commit_data.get("author") or {}
+                      if gh_author.get("login"):
+                          author_login = str(gh_author["login"]).strip()
+                      commit_author = (commit_data.get("commit") or {}).get("author") or {}
+                      if is_noreply(author_email) and commit_author.get("email"):
+                          author_email = str(commit_author["email"]).strip()
+                  except Exception as exc:
+                      print(f"Could not resolve commit author via GitHub API: {exc}")
 
           deploy_result = os.environ.get("DEPLOY_RESULT", "")
           post_result = os.environ.get("POST_DEPLOY_RESULT", "")
