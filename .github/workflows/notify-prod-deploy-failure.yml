@@ -1,0 +1,26 @@
+name: Notify Production Deploy Failure
+
+on:
+  workflow_run:
+    workflows: ["Deploy Backend (Production)"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    uses: ./.github/workflows/notify-deploy-failure.yml
+    with:
+      environment_label: production
+      deploy_result: failure
+      post_deploy_result: failure
+    secrets:
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
+      SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}
