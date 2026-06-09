@@ -13,7 +13,7 @@ Acceptance gate before treating the NOMA staging/production CI/CD rollout as com
 | REST API | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
 | Ping | `GET …/noma_staging/ping` → `{"pong":true}` |
 | WebSocket | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
-| NOMA (Amplify) | `https://staging.d1uvu3pkmkr1l6.amplifyapp.com` |
+| NOMA (Amplify) | `https://staging.d1f1y2ixvuy9lc.amplifyapp.com` |
 | Lambda | `noma-noma-staging` |
 | DynamoDB prefix | `noma-staging_*` |
 | Cognito pool | `us-east-1_vBbXLDESt` |

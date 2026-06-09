@@ -51,6 +51,38 @@ jobs:
           path: backend
           token: ${{ secrets.GH_PAT }}
 
+      - name: Checkout extension repos (blueprints)
+        uses: actions/checkout@v4
+        with:
+          repository: Noma-Travel/schd
+          ref: ${{ inputs.backend_git_ref }}
+          path: schd
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Checkout pes_noma (blueprints)
+        uses: actions/checkout@v4
+        with:
+          repository: Noma-Travel/pes_noma
+          ref: ${{ inputs.backend_git_ref }}
+          path: pes_noma
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Checkout claw (blueprints)
+        uses: actions/checkout@v4
+        with:
+          repository: Noma-Travel/claw
+          ref: main
+          path: claw
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Checkout inca (blueprints)
+        uses: actions/checkout@v4
+        with:
+          repository: Noma-Travel/Inca
+          ref: main
+          path: inca
+          token: ${{ secrets.GH_PAT }}
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:

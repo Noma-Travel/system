@@ -143,7 +143,7 @@ Launcher (`deploy_environment.py noma-staging`) created:
 | REST API | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
 | WebSocket API | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
 | Backend `WEBSOCKET_CONNECTIONS` | `https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
-| NOMA Amplify staging | `https://staging.d1uvu3pkmkr1l6.amplifyapp.com` (branch overrides in Amplify Console) |
+| NOMA Amplify staging | `https://staging.d1f1y2ixvuy9lc.amplifyapp.com` (branch overrides in Amplify Console) |
 
 **Console (`console` repo):** local developer tool only — run with `npm run dev` and `.env.development` / `.env.production` pointing at the API you are debugging. **Not** deployed via Amplify (no staging branch or app).
 
@@ -176,6 +176,8 @@ Use only for debugging or limiting blast radius — not for normal operation.
 
 Until someone signs up on staging NOMA, discovery finds 0 orgs: blueprints still upload; tools sync is skipped (success).
 
+**Blueprint upload scope:** `post_deploy` uploads JSON from `backend/blueprints` plus every sibling extension `*/blueprints` (`schd`, `pes_noma`, `claw`, `inca`, …). CI checks out those repos next to `backend/` so rings like `schd_tools` are defined before org onboarding.
+
 ### Local manual run (one org)
 
 ```bash
@@ -202,6 +204,8 @@ Same Amplify app as production; **branch-specific** env vars on branch `staging`
 | `NEXT_PUBLIC_CHAT_WS` | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
 
 Prod values stay on **All branches** / `main`.
+
+**Do not inherit prod org context on staging:** If `NEXT_PUBLIC_PORTFOLIO_ID` / `NEXT_PUBLIC_ORG_ID` are set under **All branches** (for prod/E2E), they are baked into every branch build unless overridden. First-time staging users will skip portfolio/org onboarding and see `Failed to fetch` on the dashboard. On branch **`staging`**, either **remove** those two variables or set them to **empty** so fresh users are redirected to `/portfolio` → `/organization`. After onboarding, IDs live in `localStorage` only.
 
 **WebSocket note:** the `wss` repo is a **local dev emulator** only. Staging/production chat uses API Gateway WebSocket (`1qefn6vt95`), not a deployed `wss` service.
 
@@ -230,7 +234,7 @@ done
 | `BASE_URL` / `DOC_BASE_URL` | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` |
 | `WEBSOCKET_CONNECTIONS` | `https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
 
-Update `FE_BASE_URL` / `CORS_ALLOWED_ORIGINS` if your NOMA Amplify staging URL differs from `staging.d1uvu3pkmkr1l6.amplifyapp.com`.
+Update `FE_BASE_URL` / `CORS_ALLOWED_ORIGINS` in `ZAPPA_SETTINGS_STAGING` if your NOMA Amplify staging URL differs from `staging.d1f1y2ixvuy9lc.amplifyapp.com` (Amplify app id `d1f1y2ixvuy9lc`). A mismatch causes browser `Failed to fetch` on `/_auth/tree` and blocks onboarding.
 
 ## Minimum deploy triggers (system + backend)
 
