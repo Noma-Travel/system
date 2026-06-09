@@ -185,6 +185,7 @@ jobs:
 
       - name: Email commit author (Resend)
         if: steps.meta.outputs.has_deliverable_email == 'true'
+        continue-on-error: true
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
@@ -199,6 +200,8 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import sys
+          import urllib.error
           import urllib.request
 
           payload = {
@@ -217,8 +220,13 @@ jobs:
               },
               method="POST",
           )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-              print(resp.read().decode("utf-8"))
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  print(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              body = exc.read().decode("utf-8", errors="replace")
+              print(f"Resend HTTP {exc.code}: {body}", file=sys.stderr)
+              raise
           PY
 
       - name: Warn when author email unavailable
