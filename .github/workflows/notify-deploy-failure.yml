@@ -184,7 +184,7 @@ jobs:
           PY
 
       - name: Email commit author (Resend)
-        if: steps.meta.outputs.has_deliverable_email == 'true' && secrets.RESEND_API_KEY != '' && secrets.DEPLOY_ALERT_FROM != ''
+        if: steps.meta.outputs.has_deliverable_email == 'true'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
@@ -192,6 +192,10 @@ jobs:
           SUBJECT: ${{ steps.meta.outputs.subject }}
           BODY: ${{ steps.meta.outputs.body }}
         run: |
+          if [ -z "${RESEND_API_KEY}" ] || [ -z "${DEPLOY_ALERT_FROM}" ]; then
+            echo "Resend not configured; skipping email."
+            exit 0
+          fi
           python - <<'PY'
           import json
           import os
@@ -223,11 +227,14 @@ jobs:
           echo "No deliverable author email; skipping Resend. Team Slack alert will still be sent if configured."
 
       - name: Notify team Slack channel
-        if: secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL != ''
         env:
           SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
           SLACK_TEXT: ${{ steps.meta.outputs.slack_text }}
         run: |
+          if [ -z "${SLACK_DEPLOY_TEAM_WEBHOOK_URL}" ]; then
+            echo "Slack webhook not configured; skipping."
+            exit 0
+          fi
           python - <<'PY'
           import json
           import os
