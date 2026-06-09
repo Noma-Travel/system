@@ -60,7 +60,7 @@ Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, 
 | B1 | Push to `backend/staging` only | `Deploy Backend (Staging)` runs; `noma-noma-staging` updates | **PASS** | Trigger [27162099905](https://github.com/Noma-Travel/backend/actions/runs/27162099905) → system [27162109523](https://github.com/Noma-Travel/system/actions/runs/27162109523) deploy + post_deploy green. |
 | B2 | Push to `system/staging` | Staging deploy uses `requirements.ci.staging.txt` (`@staging` refs) | **PASS** | [Run 27161056784](https://github.com/Noma-Travel/system/actions/runs/27161056784). |
 | B3 | `staging` branch exists in all 9 repos | Branches present | **PASS** | Verified 2026-06-08. |
-| B3b | Branch protection on `staging` / `main` | Rules configured | **PENDING** | Manual — GitHub Settings → Branches. |
+| B3b | Branch protection on `staging` / `main` | Rules configured | **SKIP** | Requires GitHub Team/Enterprise (paid plan) — not available on current org plan. |
 
 ---
 
@@ -70,7 +70,7 @@ Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, 
 |---|------|----------|--------|-------|
 | C1 | Successful staging deploy completes `post_deploy` | Workflow green; blueprints uploaded | **PASS** | [Run 27162109523](https://github.com/Noma-Travel/system/actions/runs/27162109523) (via B1 dispatch). |
 | C2 | Query `noma-staging_blueprints` for `noma_config` IRN | Blueprint exists | **PASS** | DynamoDB scan found 1 `noma_config` record. |
-| C3 | Tool/action counts in DynamoDB match on-disk JSON for sync orgs | Expected counts | **SKIP** | 0 orgs on staging — tools sync skipped until first signup. |
+| C3 | Tool/action counts in DynamoDB match on-disk JSON for sync orgs | Expected counts | **PENDING** | Staging admin provisioned 2026-06-09 — login + create/accept org, then re-run `post_deploy` or push `system/staging`. |
 | C4 | Intentional blueprint failure (test env) | `post_deploy` fails | **PENDING** | Optional. |
 | C5 | Repeat C1–C4 against production | Same on `noma-prod_*` | **PASS** | [Run 27162141632](https://github.com/Noma-Travel/system/actions/runs/27162141632) + [27162141706](https://github.com/Noma-Travel/system/actions/runs/27162141706). |
 
@@ -102,7 +102,7 @@ Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, 
 | # | Test | Expected | Status | Notes |
 |---|------|----------|--------|-------|
 | F1 | `GET {staging-api}/ping` | 200, `{"pong":true}` | **PASS** | Verified 2026-06-08. |
-| F2 | NOMA staging app loads; login with test user | Cognito auth | **PENDING** | User creating staging account manually. |
+| F2 | NOMA staging app loads; login with test user | Cognito auth | **PENDING** | Staging system admin provisioned 2026-06-09 (`antoniojardim@travelwithnoma.com`, Cognito `CONFIRMED`). Test login on Amplify staging URL. |
 | F3 | Console local against staging API | Hits staging Gateway | **PENDING** | |
 | F4 | WebSocket from NOMA staging | Handshake succeeds | **PENDING** | After F2. |
 | F5 | Staging isolated from prod | No prod table names in Lambda env | **PASS** | `noma-staging_*`, pool `us-east-1_vBbXLDESt`. |
@@ -132,7 +132,11 @@ Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, 
 
 ## Staging login bootstrap
 
-Staging Cognito pool (`us-east-1_vBbXLDESt`) is separate from prod. Create your user manually or use `NEXT_PUBLIC_SIGNUP_POLICY=open_self_serve` on Amplify staging branch.
+Staging Cognito pool (`us-east-1_vBbXLDESt`) is separate from prod. Public signup is **invite-only** (`NEXT_PUBLIC_SIGNUP_POLICY` default).
+
+**Provisioned 2026-06-09:** system admin `antoniojardim@travelwithnoma.com` in staging Cognito + `SYSTEM_ADMIN_EMAILS` / `SYSTEM_ADMIN_USER_IDS` on `noma-noma-staging`. Use **Entrar** (not Criar conta). For **C3**, complete org onboarding (invite flow or admin org setup) so DynamoDB has at least one org, then trigger `post_deploy`.
+
+**Before next staging deploy:** refresh GitHub secret `ZAPPA_SETTINGS_STAGING` from local `zappa_settings_staging.json` so admin env vars persist across deploys.
 
 Amplify staging overrides: `NEXT_PUBLIC_AWS_USER_POOL_ID=us-east-1_vBbXLDESt`, `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID=6rcfm5lsscs5ocnlu4ftukdbjr`.
 
@@ -165,3 +169,4 @@ Amplify staging overrides: `NEXT_PUBLIC_AWS_USER_POOL_ID=us-east-1_vBbXLDESt`, `
 | 2026-06-08 | Agent | PAT Contents fix identified | A/B blocked |
 | 2026-06-08 | User + Agent | **PAT Contents read+write + secret update** | **A1–A4, B1 PASS** |
 | 2026-06-08 | Agent | E2 artifact fix (`include-hidden-files` for `.next`) | CI pipeline PASS; 1/5 smoke spec failed |
+| 2026-06-09 | Agent | Staging system admin provisioned | Cognito + Lambda admin env; F2/C3 unblocked for manual test |
