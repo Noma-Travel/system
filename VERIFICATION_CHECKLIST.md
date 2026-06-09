@@ -134,7 +134,7 @@ Secret `SYSTEM_REPO_PAT` on: `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, 
 
 Staging Cognito pool (`us-east-1_vBbXLDESt`) is separate from prod. Public signup is **invite-only** (`NEXT_PUBLIC_SIGNUP_POLICY` default).
 
-**Provisioned 2026-06-09:** system admin `antoniojardim@travelwithnoma.com` in staging Cognito + `SYSTEM_ADMIN_EMAILS` / `SYSTEM_ADMIN_USER_IDS` on `noma-noma-staging`. Use **Entrar** (not Criar conta). For **C3**, complete org onboarding (invite flow or admin org setup) so DynamoDB has at least one org, then trigger `post_deploy`.
+**Provisioned 2026-06-09:** system admin `antoniojardim@travelwithnoma.com` in staging Cognito + `SYSTEM_ADMIN_EMAILS` / `SYSTEM_ADMIN_USER_IDS` on `noma-noma-staging`. Public user id is `5bd438a5e` (MD5 of Cognito sub, 9 chars) — **not** the raw UUID. Use **Entrar** (not Criar conta). For **C3**, complete org onboarding (invite flow or admin org setup) so DynamoDB has at least one org, then trigger `post_deploy`.
 
 **Before next staging deploy:** refresh GitHub secret `ZAPPA_SETTINGS_STAGING` from local `zappa_settings_staging.json` so admin env vars persist across deploys.
 
