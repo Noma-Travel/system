@@ -1,184 +1,287 @@
 # NOMA CI/CD — End-to-End Flow
 
-Reference diagram for developers: how code moves from Git branches to staging/production, and where tests and notifications run.
+Reference for developers: how code moves from Git branches to staging/production, where tests run, and what happens on failure.
 
 **Related docs:** [`STAGING_GUIDE.md`](STAGING_GUIDE.md) · [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) · [`NOMA/cypress/DEPLOY_CI.md`](../NOMA/cypress/DEPLOY_CI.md)
 
 ---
 
-## Branch model
+## At a glance — two independent pipelines
+
+Backend and frontend use **different CI systems**. A push to `NOMA/staging` runs **both** paths below in parallel; they do not block each other.
+
+```mermaid
+flowchart TB
+  subgraph git["Git branches"]
+    STG["staging"]
+    MAIN["main"]
+  end
+
+  subgraph backend["① Backend — GitHub Actions (system repo)"]
+    direction TB
+    B_TRIG["Trigger: push or repository_dispatch\n(backend, system, renglo-*, pes_noma, schd)"]
+    B_DEPLOY["deploy job: Zappa → Lambda"]
+    B_POST["post_deploy: blueprints + tool sync"]
+    B_TRIG --> B_DEPLOY --> B_POST
+  end
+
+  subgraph frontend_gha["② NOMA — GitHub Actions (PR / push gate)"]
+    direction TB
+    F_BUILD["job build: npm ci → npm run build"]
+    F_SMOKE["job e2e-smoke: test:e2e:smoke"]
+    F_BUILD --> F_SMOKE
+  end
+
+  subgraph frontend_amp["③ NOMA — AWS Amplify (deploy gate)"]
+    direction TB
+    A_PRE["preBuild: npm ci --include=dev, cypress verify"]
+    A_BUILD["build: next build + Cypress"]
+    A_COMP["test:component"]
+    A_E2E["test:e2e:nonchat"]
+    A_DEPLOY["DEPLOY + VERIFY → live SSR app"]
+    A_PRE --> A_BUILD --> A_COMP --> A_E2E --> A_DEPLOY
+  end
+
+  subgraph notify["Failure notifications (email + Slack #deployments)"]
+    N["notify-deploy-failure.yml\n(Resend + Slack)"]
+  end
+
+  STG --> backend
+  MAIN --> backend
+  STG --> frontend_gha
+  MAIN --> frontend_gha
+  STG -->|"push only"| frontend_amp
+  MAIN -->|"push only"| frontend_amp
+
+  B_DEPLOY -.->|fail| N
+  B_POST -.->|fail| N
+  F_SMOKE -.->|fail| N
+  A_E2E -.->|fail| N
+  A_DEPLOY -.->|fail| N
+```
+
+| Track | Runs on | Deploys? | Blocks live app if red? |
+|-------|---------|----------|-------------------------|
+| ① Backend | `system` GitHub Actions | Lambda + API GW | Yes — Lambda not updated / post_deploy fails |
+| ② NOMA GitHub `e2e.yml` | `NOMA` GitHub Actions | **No** — test gate only | No — but PR/push is red; notify fires |
+| ③ NOMA Amplify | AWS Amplify Hosting | **Yes** — `.next` SSR | Yes — BUILD fail = no DEPLOY; prior version stays live |
+
+---
+
+## Branch → environment map
+
+| Branch | Backend Lambda | Frontend URL | Dependency refs |
+|--------|----------------|--------------|-----------------|
+| `staging` | `noma-noma-staging` | `staging.d1f1y2ixvuy9lc.amplifyapp.com` | `requirements.ci.staging.txt` → `@staging` |
+| `main` | `noma-noma-prod` | `app.travelwithnoma.com` | `requirements.ci.txt` → `@main` |
+
+**Promotion:** merge `staging` → `main` across affected repos after UAT, then both environments redeploy automatically.
+
+---
+
+## ① Backend pipeline (detail)
+
+**Repo:** `Noma-Travel/system`  
+**Workflows:** `deploy-staging.yml` / `deploy.yml` (+ reusable `deploy-backend-reusable.yml`, `post-deploy-reusable.yml`)
 
 ```mermaid
 flowchart LR
-  subgraph dev["Development"]
-    FEAT["feature/* branches"]
-  end
-  subgraph integration["Integration / UAT"]
-    STG["staging branch\n(9 stack repos)"]
-  end
-  subgraph release["Production"]
-    MAIN["main branch"]
+  subgraph triggers["Triggers"]
+    T1["push system/staging|main"]
+    T2["push backend/staging|main"]
+    T3["repository_dispatch\n(renglo-lib, renglo-api, pes_noma, schd)"]
   end
 
-  FEAT -->|"PR merge"| STG
-  STG -->|"UAT + E2E green"| MAIN
-  STG -->|"auto deploy"| STG_ENV["Staging AWS + Amplify"]
-  MAIN -->|"auto deploy"| PROD_ENV["Production AWS + Amplify"]
+  subgraph jobs["Jobs (sequential)"]
+    J1["1. deploy\npip install requirements.ci*.txt\nzappa_update.sh"]
+    J2["2. post_deploy\nupload blueprints\nauto-discover orgs\nsync schd_tools/actions"]
+  end
+
+  subgraph aws["AWS"]
+    L["Lambda noma-noma-*"]
+    DDB["DynamoDB noma-*_*"]
+  end
+
+  subgraph fail["On failure"]
+    NF["notify-staging|prod-deploy-failure\n→ email + Slack"]
+  end
+
+  T1 & T2 & T3 --> J1 --> J2
+  J1 --> L
+  J2 --> DDB
+  J1 -.->|fail| NF
+  J2 -.->|fail| NF
 ```
 
-| Branch | Backend Lambda | Frontend | pip/git refs |
-|--------|----------------|----------|--------------|
-| `staging` | `noma-noma-staging` | Amplify branch `staging` | `requirements.ci.staging.txt` → `@staging` |
-| `main` | `noma-noma-prod` | Amplify branch `main` | `requirements.ci.txt` → `@main` |
+**Concurrency:** `deploy-staging` and `deploy-production` groups — one deploy at a time per environment.
+
+**Cross-repo dispatch:** `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd` use `SYSTEM_REPO_PAT` (Contents **read+write** on `system`) to fire `repository_dispatch`.
 
 ---
 
-## Full pipeline (all repos)
+## ② NOMA — GitHub Actions (`e2e.yml`)
+
+**Purpose:** Fast feedback on PRs and pushes. **Does not deploy** the app.
+
+**Trigger:** push or PR to `staging`, `main`, or `develop`
 
 ```mermaid
 flowchart TB
-  subgraph repos["GitHub repos (9-stack)"]
-    R1["backend"]
-    R2["system"]
-    R3["renglo-lib / renglo-api"]
-    R4["pes_noma / schd"]
-    R5["NOMA (frontend)"]
+  START["push / PR to NOMA"] --> BUILD
+
+  subgraph BUILD["job: build (~20 min max)"]
+    B1["checkout"]
+    B2["npm ci --include=dev"]
+    B3["npm run build"]
+    B4["upload .next artifact"]
+    B1 --> B2 --> B3 --> B4
   end
 
-  subgraph triggers["What triggers a backend deploy"]
-    T1["push to system/staging or system/main"]
-    T2["push to backend/staging or backend/main"]
-    T3["repository_dispatch from dependency repos"]
+  BUILD --> SMOKE
+
+  subgraph SMOKE["job: e2e-smoke (needs build)"]
+    S1["download .next artifact"]
+    S2["npx cypress verify"]
+    S3["npm run start + wait-on /login"]
+    S4["npm run test:e2e:smoke\n(login-error, settings, invoices, trip-detail)"]
+    S1 --> S2 --> S3 --> S4
   end
 
-  subgraph system_ci["Noma-Travel/system — GitHub Actions"]
-    DS["deploy-staging.yml\n(or deploy.yml for prod)"]
-    REUSE["deploy-backend-reusable.yml"]
-    ZAPPA["zappa_update.sh → Lambda update"]
-    PD["post-deploy-reusable.yml"]
-    SYNC["Blueprints upload +\norg discovery +\ntool/action sync"]
-    NOTIFY["notify-*-deploy-failure.yml\n(email + Slack #deployments)"]
-  end
-
-  subgraph aws_staging["AWS staging"]
-    L_STG["Lambda noma-noma-staging"]
-    API_STG["REST API …/noma_staging"]
-    WS_STG["WebSocket 1qefn6vt95"]
-    DDB_STG["DynamoDB noma-staging_*"]
-    AMP_STG["Amplify staging.d1f1y2ixvuy9lc…"]
-  end
-
-  subgraph aws_prod["AWS production"]
-    L_PROD["Lambda noma-noma-prod"]
-    API_PROD["REST API …/noma_prod"]
-    WS_PROD["WebSocket 3vdnaldxj0"]
-    DDB_PROD["DynamoDB noma-prod_*"]
-    AMP_PROD["Amplify app.travelwithnoma.com"]
-  end
-
-  subgraph frontend_ci["Noma-Travel/Noma — GitHub Actions + Amplify"]
-    GHA["e2e.yml: build + e2e-smoke"]
-    AMP_BUILD["amplify.yml BUILD phase:\nnpm ci --include=dev → build →\ntest:component + test:e2e:nonchat"]
-  end
-
-  R2 --> T1
-  R1 --> T2
-  R3 --> T3
-  R4 --> T3
-
-  T1 --> DS
-  T2 --> DS
-  T3 --> DS
-
-  DS --> REUSE --> ZAPPA
-  ZAPPA --> L_STG
-  ZAPPA --> L_PROD
-  REUSE --> PD --> SYNC
-  SYNC --> DDB_STG
-  SYNC --> DDB_PROD
-  DS -.->|"on failure"| NOTIFY
-
-  R5 -->|"push staging/main"| AMP_BUILD
-  R5 -->|"PR / push"| GHA
-  AMP_BUILD --> AMP_STG
-  AMP_BUILD --> AMP_PROD
-
-  AMP_STG --> API_STG
-  AMP_STG --> WS_STG
-  AMP_PROD --> API_PROD
-  AMP_PROD --> WS_PROD
-  L_STG --> API_STG
-  L_PROD --> API_PROD
+  SMOKE -->|pass| OK["✓ PR / push green"]
+  SMOKE -->|fail| NF["notify-e2e-failure.yml\nemail + Slack #deployments"]
 ```
+
+| Step | Command / action | What it catches |
+|------|------------------|-----------------|
+| build | `npm run build` | TypeScript / compile errors |
+| e2e-smoke | `test:e2e:smoke` | Deterministic Cypress specs (no live LLM) |
+
+**Workflow file:** [`NOMA/.github/workflows/e2e.yml`](../NOMA/.github/workflows/e2e.yml)  
+**Notify workflow:** [`NOMA/.github/workflows/notify-e2e-failure.yml`](../NOMA/.github/workflows/notify-e2e-failure.yml)
 
 ---
 
-## Backend deploy sequence (staging example)
+## ③ NOMA — AWS Amplify (deploy pipeline)
+
+**Purpose:** Build, test, and **deploy** the SSR app. Runs on **push** to `staging` or `main` (not on PRs).
+
+**Config:** [`NOMA/amplify.yml`](../NOMA/amplify.yml)  
+**Note:** WEB_COMPUTE (Next.js SSR) ignores Amplify’s separate `test:` phase — Cypress runs inside the **build** phase.
+
+```mermaid
+flowchart TB
+  START["push to NOMA staging|main"] --> AMP
+
+  subgraph AMP["Amplify job (BUILD → DEPLOY → VERIFY)"]
+    direction TB
+
+    subgraph BUILD["Phase: BUILD"]
+      P1["preBuild\nnpm ci --include=dev\nnpx cypress verify"]
+      P2["npm run build"]
+      P3["npm run start & + wait-on /login"]
+      P4["npm run test:component"]
+      P5["npm run test:e2e:nonchat"]
+      P6["artifact: .next/** only\n(no Cypress in runtime bundle)"]
+      P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    end
+
+    BUILD -->|pass| DEPLOY
+    BUILD -->|fail| STOP["✗ DEPLOY skipped\nprevious version still live"]
+
+    subgraph DEPLOY["Phase: DEPLOY"]
+      D1["Publish .next to Amplify SSR"]
+    end
+
+    DEPLOY --> VERIFY
+
+    subgraph VERIFY["Phase: VERIFY"]
+      V1["Health / screenshot checks"]
+    end
+
+    VERIFY --> LIVE["✓ Live at Amplify URL"]
+    DEPLOY -.->|fail| NOTIFY
+    VERIFY -.->|fail| NOTIFY
+    STOP --> NOTIFY
+  end
+
+  NOTIFY["notify-amplify-failure.yml\nEventBridge → repository_dispatch\n→ email + Slack #deployments"]
+```
+
+| Step | Script | Specs / scope |
+|------|--------|----------------|
+| test:component | `cypress run --component` | UI component tests |
+| test:e2e:nonchat | auth, crud, trips, settings | Full non-chat E2E (deploy gate) |
+| test:e2e:smoke | *(GitHub only)* | Subset — see track ② |
+
+**If BUILD fails** (including Cypress): Amplify stops the job; **DEPLOY never runs**; users keep the last successful deployment.
+
+---
+
+## Frontend failure notifications
+
+Same channel as backend: **Resend email** to commit author + **Slack `#deployments`**.
+
+| Failure source | Workflow | Auto-trigger? | Secrets on `NOMA` repo |
+|----------------|----------|---------------|-------------------------|
+| GitHub `e2e.yml` (build / e2e-smoke) | `notify-e2e-failure.yml` | **Yes** — `workflow_run` on "Build and E2E" | `RESEND_API_KEY`, `DEPLOY_ALERT_FROM`, `SLACK_DEPLOY_TEAM_WEBHOOK_URL`, `GH_PAT`, `USER_EMAIL_MAP` |
+| Amplify BUILD / DEPLOY / VERIFY | `notify-amplify-failure.yml` | **Yes** — after EventBridge wiring (below) | Same secrets |
+| Backend Zappa / post_deploy | `system/notify-*-deploy-failure.yml` | **Yes** | Secrets on `system` repo |
+
+### Amplify → GitHub notify wiring
+
+Amplify builds do not run inside GitHub Actions, so a small AWS hook bridges failures into the same notify workflow:
 
 ```mermaid
 sequenceDiagram
-  participant Dev as Developer
-  participant Dep as backend / renglo-lib / schd …
-  participant Sys as system repo
-  participant GHA as GitHub Actions
-  participant AWS as AWS Lambda + API GW
-  participant DDB as DynamoDB
+  participant Amp as AWS Amplify
+  participant EB as EventBridge
+  participant GH as GitHub NOMA repo
+  participant N as notify-amplify-failure.yml
+  participant Slack as Slack #deployments
 
-  Dev->>Dep: merge PR to staging
-  Dep->>Sys: repository_dispatch<br/>(SYSTEM_REPO_PAT)
-  Sys->>GHA: deploy-staging.yml
-  GHA->>GHA: pip install requirements.ci.staging.txt (@staging refs)
-  GHA->>AWS: zappa_update.sh noma_staging update
-  GHA->>GHA: post_deploy job
-  GHA->>DDB: upload all blueprints
-  GHA->>DDB: discover orgs → sync schd_tools / schd_actions
-  alt deploy fails
-    GHA->>Dev: Resend email to commit author
-    GHA->>Dev: Slack #deployments
-  end
+  Amp->>Amp: BUILD fails (Cypress, compile, etc.)
+  Amp->>EB: Amplify Deployment Status Change (FAILED)
+  EB->>GH: repository_dispatch amplify-build-failed
+  GH->>N: workflow runs
+  N->>Slack: same payload as backend failures
+  N->>GH: Resend email to commit author
 ```
 
-**Concurrency:** `deploy-staging` and `deploy-production` groups queue overlapping runs (one completes at a time).
+**Dispatch payload example** (Lambda or script posts to GitHub API):
 
-**Dependency repos** that dispatch to `system` on push to `staging`/`main`:
+```json
+{
+  "event_type": "amplify-build-failed",
+  "client_payload": {
+    "environment_label": "staging",
+    "branch": "staging",
+    "job_id": "6",
+    "commit_sha": "…",
+    "commit_author_email": "…"
+  }
+}
+```
 
-- `backend`, `renglo-lib`, `renglo-api`, `pes_noma`, `schd`
-
-Each uses `deploy-trigger-staging.yml` or `deploy-trigger.yml` with secret `SYSTEM_REPO_PAT` (fine-grained PAT: **Contents read+write** on `Noma-Travel/system`).
+Until EventBridge is wired, Amplify failures are visible in the [Amplify Console](https://us-east-1.console.aws.amazon.com/amplify/apps) only. Copy the same secrets from `system` to `NOMA` before enabling notify workflows.
 
 ---
 
-## Frontend deploy & test gates
+## Backend failure notifications (reference)
 
 ```mermaid
-flowchart TB
-  subgraph pr_gate["PR / push gate (GitHub only — no deploy)"]
-    B1["job: build\nnpm ci --include=dev → npm run build"]
-    B2["job: e2e-smoke\nreuse .next artifact\ntest:e2e:smoke"]
-    B1 --> B2
-  end
+sequenceDiagram
+  participant GHA as system GitHub Actions
+  participant N as notify-deploy-failure.yml
+  participant Email as Resend
+  participant Slack as Slack
 
-  subgraph amp_gate["Deploy gate (Amplify — WEB_COMPUTE)"]
-    A1["preBuild: npm ci --include=dev + cypress verify"]
-    A2["build: npm run build"]
-    A3["start + wait-on /login"]
-    A4["test:component"]
-    A5["test:e2e:nonchat"]
-    A6["artifact: .next/** only\n(no Cypress in runtime bundle)"]
-    A1 --> A2 --> A3 --> A4 --> A5 --> A6
-  end
-
-  PR["NOMA PR / push staging|main"] --> pr_gate
-  MERGE["Merge to staging/main"] --> amp_gate
-  A6 --> LIVE["Amplify SSR deploy"]
+  GHA->>GHA: deploy or post_deploy fails
+  GHA->>N: workflow_run (notify-staging|prod-deploy-failure)
+  N->>Email: commit author
+  N->>Slack: #deployments
 ```
 
-| Suite | Runs in Amplify BUILD | Runs in GitHub e2e.yml | Manual |
-|-------|----------------------|------------------------|--------|
-| Component tests | Yes | No | `npm run test:component` |
-| Non-chat E2E | Yes | No | `npm run test:e2e:nonchat` |
-| Smoke E2E | No | Yes | `npm run test:e2e:smoke` |
-| Chat / agent E2E | No | No | `npm run test:e2e:chat` (LLM-dependent) |
+**Reusable workflow:** [`system/.github/workflows/notify-deploy-failure.yml`](.github/workflows/notify-deploy-failure.yml)
 
 ---
 
@@ -186,51 +289,57 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  STG_OK["Staging sign-off\n(UAT + E2E green)"]
-  MERGE["Merge staging → main\n(coordinated across affected repos)"]
-  PROD_DEPLOY["system deploy.yml\nrequirements.ci.txt @main"]
-  PROD_POST["post_deploy on noma-prod"]
-  PROD_FE["Amplify main branch build"]
-  STG_OK --> MERGE --> PROD_DEPLOY --> PROD_POST
-  MERGE --> PROD_FE
+  UAT["Staging UAT green\n(API ping, login, Cypress)"]
+  MERGE["Merge staging → main\n(all touched repos)"]
+  BE["Backend auto-deploy\nsystem deploy.yml"]
+  FE_GHA["NOMA e2e.yml on main"]
+  FE_AMP["Amplify main branch build"]
+  UAT --> MERGE
+  MERGE --> BE
+  MERGE --> FE_GHA
+  MERGE --> FE_AMP
 ```
 
-After promotion, verify prod ping (`GET …/noma_prod/ping`), a quick spot-check on the prod app, and `requirements.ci.txt` in deploy logs.
+After promotion: `GET …/noma_prod/ping` → `{"pong":true}`, spot-check prod app, confirm `requirements.ci.txt` in deploy logs.
 
 ---
 
-## Environment map (quick reference)
+## Environment URLs
 
 | | Staging | Production |
 |---|---------|------------|
 | REST API | `https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging` | `https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod` |
 | WebSocket | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` | `wss://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production` |
-| NOMA URL | `https://staging.d1f1y2ixvuy9lc.amplifyapp.com` | `https://app.travelwithnoma.com` |
+| NOMA app | `https://staging.d1f1y2ixvuy9lc.amplifyapp.com` | `https://app.travelwithnoma.com` |
 | Lambda | `noma-noma-staging` | `noma-noma-prod` |
-| DynamoDB prefix | `noma-staging_*` | `noma-prod_*` |
-| Cognito pool | `us-east-1_vBbXLDESt` | (prod pool — see Zappa settings) |
+| DynamoDB | `noma-staging_*` | `noma-prod_*` |
+| Cognito | `us-east-1_vBbXLDESt` | (prod pool — see Zappa settings) |
 
 ---
 
-## Secrets checklist (operators)
+## Secrets checklist
 
-| Secret | Where | Purpose |
-|--------|-------|---------|
-| `SYSTEM_REPO_PAT` | backend, renglo-*, pes_noma, schd | Cross-repo `repository_dispatch` |
-| `ZAPPA_SETTINGS` / `ZAPPA_SETTINGS_STAGING` | system | Lambda env + Zappa config JSON |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | system | Deploy + post_deploy |
-| `GH_PAT` | system | Checkout private repos in CI |
-| `RESEND_API_KEY` / `SLACK_DEPLOY_WEBHOOK_URL` | system | Failure notifications |
-| `CYPRESS_*` / `NEXT_PUBLIC_*` | NOMA (GitHub + Amplify) | E2E and build-time env |
+| Secret | `system` | `NOMA` | Purpose |
+|--------|----------|--------|---------|
+| `SYSTEM_REPO_PAT` | — | — | On backend, renglo-*, pes_noma, schd |
+| `ZAPPA_SETTINGS` / `ZAPPA_SETTINGS_STAGING` | ✓ | — | Lambda env |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | ✓ | — | Deploy |
+| `GH_PAT` | ✓ | ✓ | Private checkouts + author lookup |
+| `RESEND_API_KEY` / `DEPLOY_ALERT_FROM` | ✓ | ✓ | Failure email |
+| `SLACK_DEPLOY_TEAM_WEBHOOK_URL` | ✓ | ✓ | `#deployments` |
+| `USER_EMAIL_MAP` | ✓ | ✓ | noreply → real email |
+| `CYPRESS_*` / `NEXT_PUBLIC_*` | — | ✓ | Build + E2E |
 
 ---
 
-## Troubleshooting pointers
+## Troubleshooting
 
-| Symptom | Likely cause | Doc / fix |
-|---------|--------------|-----------|
-| Amplify BUILD fails on Cypress | devDeps skipped or WEB_COMPUTE ignores `test:` phase | [`NOMA/amplify.yml`](../NOMA/amplify.yml) — tests in **build** phase |
-| Chat WebSocket HTTP 500 on connect | Missing `$connect` route/integration responses on MOCK API | `system/scripts/fix_staging_ws_connect.py` or launcher `create_websocket_api.py` |
-| `Failed to fetch` after staging login | CORS / `FE_BASE_URL` mismatch or prod org IDs on Amplify **All branches** | [`STAGING_GUIDE.md`](STAGING_GUIDE.md) Step 8 |
-| post_deploy finds 0 orgs | No orgs in staging DynamoDB yet | Complete onboarding on staging NOMA first |
-| Deploy notify workflow 0s / skipped | Invalid `secrets.*` in workflow `if:` | Fixed in `notify-deploy-failure.yml` (2026-06-09) |
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Amplify BUILD fails on Cypress | WEB_COMPUTE ignores `test:` phase | Tests in **build** phase — [`amplify.yml`](../NOMA/amplify.yml) |
+| No Slack on Amplify fail | EventBridge → `repository_dispatch` not wired | See § Amplify → GitHub notify wiring |
+| No Slack on `e2e.yml` fail | Secrets missing on `NOMA` | Copy from `system`; enable `notify-e2e-failure.yml` |
+| `e2e-smoke` passes but Amplify fails | Different suites (smoke ⊂ nonchat) | Check Amplify BUILD log for failing spec |
+| Chat WebSocket HTTP 500 | Missing `$connect` MOCK responses | Launcher `create_websocket_api.py` |
+| post_deploy finds 0 orgs | No orgs in staging DynamoDB | Complete onboarding on staging NOMA |
+| CORS / Failed to fetch on staging | `FE_BASE_URL` / Amplify org env vars | [`STAGING_GUIDE.md`](STAGING_GUIDE.md) Step 8 |
