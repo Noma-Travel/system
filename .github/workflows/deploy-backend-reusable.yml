@@ -151,20 +151,6 @@ jobs:
           print(f"zappa_settings.json validation OK for stage {stage_name!r}")
           PY
 
-      # Gated hook for checklist D1–D4: fails before Zappa touches Lambda when the commit
-      # message contains [verify-deploy-fail]. Safe to leave in place — inert otherwise.
-      - name: CI verification deploy failure hook
-        env:
-          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
-          DISPATCH_MESSAGE: ${{ github.event.client_payload.commit_message }}
-        run: |
-          msg="${PUSH_MESSAGE}${DISPATCH_MESSAGE}"
-          if echo "$msg" | grep -q '\[verify-deploy-fail\]'; then
-            echo "Intentional deploy failure for notification verification (D1–D4)."
-            exit 1
-          fi
-          echo "No verification failure marker; continuing deploy."
-
       - name: Deploy with manual packaging script
         env:
           REQUIREMENTS_CI_FILE: ${{ inputs.requirements_file }}
