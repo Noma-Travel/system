@@ -192,6 +192,12 @@ python C:/Noma/extensions/backend/installer/noma_post_deploy_org.py ^
 
 ## Step 8 — NOMA frontend staging (Amplify)
 
+Provision the dedicated E2E tenant first (staging):
+
+```bash
+python system/scripts/provision_e2e_tenant.py --env staging --email e2e+noma@travelwithnoma.com --password "$E2E_PASSWORD"
+```
+
 Same Amplify app as production; **branch-specific** env vars on branch `staging` (not a second app):
 
 | Variable | Staging value |
@@ -202,10 +208,16 @@ Same Amplify app as production; **branch-specific** env vars on branch `staging`
 | `NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID` | `6rcfm5lsscs5ocnlu4ftukdbjr` |
 | `NEXT_PUBLIC_VITE_COGNITO_*` | same Cognito IDs |
 | `NEXT_PUBLIC_CHAT_WS` | `wss://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production` |
+| `NEXT_PUBLIC_PORTFOLIO_ID` | `<staging E2E_PORTFOLIO_ID from provision script>` |
+| `NEXT_PUBLIC_ORG_ID` | `<staging E2E_ORG_ID>` |
+| `CYPRESS_LOGIN_EMAIL` / `PASSWORD` | E2E `org_admin` user (not global admin) |
+| `CYPRESS_E2E_PORTFOLIO_ID` / `CYPRESS_E2E_ORG_ID` | same as `NEXT_PUBLIC_PORTFOLIO_ID` / `ORG_ID` |
 
-Prod values stay on **All branches** / `main`.
+On branch **`main`**, set the same variables with **production** E2E IDs from `provision_e2e_tenant.py --env prod`.
 
-**Do not inherit prod org context on staging:** If `NEXT_PUBLIC_PORTFOLIO_ID` / `NEXT_PUBLIC_ORG_ID` are set under **All branches** (for prod/E2E), they are baked into every branch build unless overridden. First-time staging users will skip portfolio/org onboarding and see `Failed to fetch` on the dashboard. On branch **`staging`**, either **remove** those two variables or set them to **empty** so fresh users are redirected to `/portfolio` → `/organization`. After onboarding, IDs live in `localStorage` only.
+Prod Cognito/API values stay on **`main`** only — do not set customer portfolio/org under **All branches**.
+
+**Do not inherit prod customer org context on staging:** If `NEXT_PUBLIC_PORTFOLIO_ID` / `NEXT_PUBLIC_ORG_ID` point at FCDG or prod internal org under **All branches**, Cypress can mutate customer data. Remove from All branches; pin E2E IDs per branch only.
 
 **WebSocket note:** the `wss` repo is a **local dev emulator** only. Staging/production chat uses API Gateway WebSocket (`1qefn6vt95`), not a deployed `wss` service.
 
