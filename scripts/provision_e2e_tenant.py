@@ -25,11 +25,27 @@ import string
 import sys
 from pathlib import Path
 
+try:
+    import truststore  # Windows / corporate CA fixes for boto3 (optional)
+
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import boto3
 from botocore.exceptions import ClientError
 
 TENANT_NAME = "Noma E2E"
 CHAT_TRAVELER_NAME = "Antonio Jardim"
+# Synthetic core profile so dashboard routes (e.g. /dashboard/invoices) are not blocked
+# by the attendant profile gate. Document is intentionally omitted (not required for core).
+E2E_CORE_PROFILE = {
+    "country": "Brazil",
+    "date_of_birth": "01/01/1990",
+    "gender": "male",
+    "mobile_phone": "+5511999990001",
+    "client_whatsapp": "+5511999990001",
+}
 REGION = "us-east-1"
 PROFILE = os.environ.get("AWS_PROFILE", "noma")
 
@@ -285,6 +301,85 @@ def ensure_admin_attendant(
     print(f"Role: org_admin bootstrapped ({boot.get('message')})")
 
 
+def _find_attendant_by_email(items: list[dict], email: str) -> dict | None:
+    target = email.strip().lower()
+    return next(
+        (a for a in items if str(a.get("email") or "").strip().lower() == target),
+        None,
+    )
+
+
+def _attendant_core_complete(attendant: dict, email: str) -> bool:
+    """Mirror frontend validateAttendantCoreProfile (no travel document)."""
+    name = str(attendant.get("name") or "").strip()
+    if len(name.split()) < 2:
+        return False
+    if not str(attendant.get("email") or email).strip():
+        return False
+    dob = str(
+        attendant.get("date_of_birth") or attendant.get("nascimento") or ""
+    ).strip()
+    if not dob:
+        return False
+    gender = str(
+        attendant.get("gender") or attendant.get("sex") or attendant.get("sexo") or ""
+    ).strip()
+    if not gender:
+        return False
+    country = str(
+        attendant.get("country") or attendant.get("pais") or ""
+    ).strip()
+    if not country:
+        return False
+    phone = str(
+        attendant.get("mobile_phone") or attendant.get("client_whatsapp") or ""
+    ).strip()
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) < 8:
+        return False
+    status = str(attendant.get("status") or "").strip().lower()
+    user_id = str(attendant.get("user_id") or "").strip()
+    return status in ("1", "active") and bool(user_id)
+
+
+def ensure_admin_attendant_core_profile(
+    dac,
+    auc,
+    portfolio_id: str,
+    org_id: str,
+    user_id: str,
+    email: str,
+    first: str,
+    last: str,
+) -> None:
+    from noma.handlers.complete_attendant import CompleteAttendant
+
+    auc.set_invocation_user(user_id)
+    resp = dac.get_a_b(portfolio_id, org_id, "noma_attendants", limit=1000)
+    items = resp.get("items", []) if resp and resp.get("success") else []
+    attendant = _find_attendant_by_email(items, email)
+    if attendant and _attendant_core_complete(attendant, email):
+        print(f"Attendants: core profile already complete for {email}")
+        return
+
+    full_name = f"{first} {last}".strip()
+    result = CompleteAttendant().complete_attendant(
+        portfolio_id=portfolio_id,
+        email=email,
+        name=full_name,
+        country=E2E_CORE_PROFILE["country"],
+        date_of_birth=E2E_CORE_PROFILE["date_of_birth"],
+        gender=E2E_CORE_PROFILE["gender"],
+        status=1,
+        org_hint=org_id,
+        mobile_phone=E2E_CORE_PROFILE["mobile_phone"],
+        client_whatsapp=E2E_CORE_PROFILE["client_whatsapp"],
+    )
+    if not result.get("success"):
+        raise RuntimeError(f"complete_attendant failed for E2E admin: {result}")
+    print(f"Attendants: core profile completed for {email} (dashboard gates unlocked)")
+
+
 def ensure_chat_traveler(dac, portfolio_id: str, org_id: str, email: str) -> None:
     resp = dac.get_a_b(portfolio_id, org_id, "noma_attendants", limit=1000)
     items = resp.get("items", []) if resp and resp.get("success") else []
@@ -431,6 +526,9 @@ def _provision_in_context(
         ensure_org_onboarding(auc, dac, portfolio_id, org_id, user_id)
 
     ensure_admin_attendant(dac, auc, portfolio_id, org_id, user_id, email, first, last)
+    ensure_admin_attendant_core_profile(
+        dac, auc, portfolio_id, org_id, user_id, email, first, last
+    )
     if not skip_chat_traveler:
         ensure_chat_traveler(dac, portfolio_id, org_id, email)
 

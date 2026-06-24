@@ -192,7 +192,7 @@ python C:/Noma/extensions/backend/installer/noma_post_deploy_org.py ^
 
 ## Step 8 — NOMA frontend staging (Amplify)
 
-Provision the dedicated E2E tenant first (staging):
+Provision the dedicated E2E tenant first (staging). Re-run the same command after script updates to backfill idempotent fixes (e.g. completing the admin attendant core profile so Cypress can reach `/dashboard/invoices`):
 
 ```bash
 python system/scripts/provision_e2e_tenant.py --env staging --email e2e+noma@travelwithnoma.com --password "$E2E_PASSWORD"
