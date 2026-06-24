@@ -103,6 +103,18 @@ Used by `renglo-lib` `auth_model.send_email` / `invite_user_funnel` and by `noma
 
 **Local:** Copy values into `env_config.py` (see `env_config.py.TEMPLATE`). `RESEND_API_KEY` and `INVITE_FROM` mirror what other handlers (`create_invoice`, `flight_monitor`) already expect.
 
+#### Rextur observability (Slack incoming webhooks)
+
+System-wide Slack webhooks for Rextur API errors, booking confirmations, and the daily active-travels monitor. Set in **`zappa_settings.json`** / **`zappa_settings_staging.json`** (`environment_variables` for `noma_prod` / `noma_staging`). Per-org `noma_config` fields still override these when present.
+
+| Variable | Channel | Required for |
+|----------|---------|--------------|
+| `SLACK_API_ERRORS_WEBHOOK_URL` | API errors | Rextur gateway failure alerts (timeout / non-2xx / transport error) |
+| `SLACK_BOOKINGS_WEBHOOK_URL` | Bookings | Flight booking confirmed (200 OK) — no-op when empty |
+| `SLACK_ACTIVE_TRAVELS_WEBHOOK_URL` | Active travels | Daily trips starting today/tomorrow — no-op when empty |
+
+**CI deploy:** GitHub Actions writes `zappa_settings.json` from the **`ZAPPA_SETTINGS`** secret (`deploy-backend-reusable.yml`). After editing the local `zappa_settings*.json` files, sync the same keys into that secret before the next backend deploy so Lambda receives the webhook URLs.
+
 CORS / allowed access in backend:
 
 - In Lambda, allowed origins are built from `FE_BASE_URL` + `APP_FE_BASE_URL`.
@@ -417,6 +429,50 @@ With a fresh user:
 - If onboarding data looks stale after resets, refresh tree cache and rerun the post-deploy setup sequence.
 - If chat connects but no answer arrives, inspect `/_chat/message` path in CloudWatch and confirm the handler in `core` executed successfully (not blocked by import/runtime errors).
 - If plan/action executes but UI receives fallback text instead of cards, inspect the tool `handler_call` log result first; many "no results" responses are downstream of tool exceptions.
+
+---
+
+## 10) Production data observability (PITR + CloudTrail)
+
+Enable **before** investigating future customer data loss. PITR only restores from enablement forward.
+
+### DynamoDB PITR (`noma-prod_data`)
+
+```bash
+aws dynamodb update-continuous-backups \
+  --table-name noma-prod_data \
+  --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true \
+  --profile noma --region us-east-1
+
+aws dynamodb describe-continuous-backups --table-name noma-prod_data \
+  --profile noma --region us-east-1
+```
+
+### CloudTrail with DynamoDB data events
+
+1. S3 bucket for trail logs (e.g. `noma-prod-cloudtrail-logs-<account-id>`)
+2. Trail `noma-prod-audit`: management Read+Write; **data events** on `noma-prod_data` (ReadWriteType: All)
+
+Example lookup for trip deletes (after trail is active):
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=DeleteItem \
+  --profile noma --region us-east-1
+```
+
+Scratch helper: `system/_local_scratch/cloudtrail_trip_deletes.py`.
+
+### Lambda log retention
+
+`/aws/lambda/noma-noma-prod` defaults to 72h — extend for incidents:
+
+```bash
+aws logs put-retention-policy \
+  --log-group-name /aws/lambda/noma-noma-prod \
+  --retention-in-days 30 \
+  --profile noma --region us-east-1
+```
 
 ---
 
