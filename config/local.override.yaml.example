@@ -1,0 +1,4 @@
+# Copy to local.override.yaml (gitignored) for personal overrides.
+# NEXT_PUBLIC_PORTFOLIO_ID: your-e2e-portfolio
+# NEXT_PUBLIC_ORG_ID: your-e2e-org
+# DYNAMODB_ENTITY_TABLE: my-env_entities

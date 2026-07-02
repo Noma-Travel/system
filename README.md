@@ -150,31 +150,18 @@ pip install -e renglo-api
 
 Step 3.
 
-Insert the provided* config files and start the system and console
-(*) A system admin should have provided the config files to you.
+Configure local environment with the centralized `run` command (no manual `.env` files from admins).
 
-Place env_config.py in the /system folder
-Place .env.development and .env.production in the /console folder
-
-
-Copy run.sh.TEMPLATE to run.sh
-```bash
-# Copy the run script template
-cp system/run.sh.TEMPLATE system/run.sh
-
-# Edit with your AWS profile and region
-nano run.sh
+```powershell
+aws sso login --profile noma
+cd system
+.\run.ps1 noma console backend env:staging handler:local
 ```
 
-Example `run.sh`:
+Full guide: **`system/docs/GUIA_DESENVOLVEDOR.md`** (PT-BR) or `system/docs/ENVIRONMENT_SETUP.md` (EN).
 
-```bash
-#!/bin/bash
-export AWS_PROFILE=my-profile
-export AWS_DEFAULT_REGION=us-east-1
-
-python main.py
-```
+Generated files (do not commit): `env_config.py`, `console/.env.development`, `NOMA/.env.local`.
+Personal overrides: `system/config/local.override.yaml` (copy from `local.override.yaml.example`).
 
 ## Running the System
 
@@ -265,22 +252,19 @@ Notes:
 
 
 
-## RUNNING THE SYSTEM
+## Running the System
 
+### Local Development
 
+Use the centralized launcher (generates config + starts processes):
 
-Initialize the backEnd (system)
-```
+```powershell
 cd system
-source venv/bin/activate
-source run.sh
+aws sso login --profile noma
+.\run.ps1 noma console backend env:staging handler:local
 ```
 
-Initialize the console (in another terminal)
-```
-cd console
-npm run dev
-```
+See `docs/GUIA_DESENVOLVEDOR.md` for scenarios and troubleshooting.
 
 
 
