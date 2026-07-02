@@ -31,7 +31,7 @@ def build_backend_env(
 
     if parts:
         existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = ";".join(parts + ([existing] if existing else []))
+        env["PYTHONPATH"] = os.pathsep.join(parts + ([existing] if existing else []))
 
     return env
 
