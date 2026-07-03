@@ -23,6 +23,11 @@ on:
         description: Environment variable name holding sync orgs JSON
         required: true
         type: string
+      system_git_ref:
+        description: Git ref of the system repo to checkout (e.g. main, staging)
+        required: false
+        type: string
+        default: main
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -42,6 +47,8 @@ jobs:
     steps:
       - name: Checkout system repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.system_git_ref }}
 
       - name: Checkout backend repo (installer + blueprints)
         uses: actions/checkout@v4
