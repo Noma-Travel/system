@@ -1,0 +1,31 @@
+# Non-secret defaults for env:staging (from zappa_settings_staging.json + STAGING_GUIDE)
+WL_NAME: Noma Staging
+URL_PREFIX: noma_staging
+BASE_URL: https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging
+DOC_BASE_URL: https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging
+FE_BASE_URL: https://staging.travelwithnoma.com
+APP_FE_BASE_URL: https://staging.travelwithnoma.com
+API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:2r4dlx8qdj
+SYS_ENV: noma_staging
+AGENT_LANGUAGE: en
+NOMA_ROLE_ENFORCEMENT: "on"
+NOMA_E2E_SEED_ALLOWED: "1"
+DYNAMODB_ENTITY_TABLE: noma-staging_entities
+DYNAMODB_BLUEPRINT_TABLE: noma-staging_blueprints
+DYNAMODB_RINGDATA_TABLE: noma-staging_data
+DYNAMODB_REL_TABLE: noma-staging_rel
+DYNAMODB_CHAT_TABLE: noma-staging_chat
+COGNITO_REGION: us-east-1
+COGNITO_USERPOOL_ID: us-east-1_vBbXLDESt
+COGNITO_APP_CLIENT_ID: 6rcfm5lsscs5ocnlu4ftukdbjr
+COGNITO_CHECK_TOKEN_EXPIRATION: "True"
+PREVIEW_LAYER: "2"
+S3_BUCKET_NAME: noma-staging-42067270
+WEBSOCKET_CONNECTIONS: https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production
+ALLOW_DEV_ORIGINS: "true"
+INVITE_FROM: Noma Staging <noreply@travelwithnoma.com>
+SES_INVITE_SENDER: noreply@travelwithnoma.com
+VITE_EXTENSIONS: schd,data,backend
+VITE_WL_LOGO: /small_logo.jpg
+VITE_WL_LOGIN: /large_logo.jpg
+VITE_DEV_MODE: "true"
