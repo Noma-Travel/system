@@ -74,6 +74,7 @@ IGNORE_VARS = frozenset({
     "SKIP_CANCEL",
     "SOURCE",
     "TICKET_NUMBER",
+    "TERMINAL",
     "URL_PREFIX",
     "USER",
     "VERCEL",

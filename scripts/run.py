@@ -19,6 +19,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from noma_env.backend_launcher import backend_command, build_backend_env
 from noma_env.envgen import default_handler_for_apps, generate
 from noma_env.paths import CONSOLE_DIR, NOMA_DIR, SYSTEM_DIR, VALID_APPS, normalize_env
+from noma_env.terminal_spawn import spawn_in_terminal
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("run")
@@ -53,17 +54,7 @@ def print_banner(env: str, handler: str, apps: list[str]) -> None:
     logger.info("=" * 60)
 
 
-def spawn_process(name: str, cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
-    logger.info("[%s] %s", name, " ".join(cmd))
-    return subprocess.Popen(
-        cmd,
-        cwd=str(cwd),
-        env=env,
-        shell=False,
-    )
-
-
-def run_dev_processes(apps: list[str]) -> int:
+def run_dev_processes(apps: list[str], *, same_terminal: bool = False) -> int:
     children: list[tuple[str, subprocess.Popen]] = []
 
     def shutdown(_signum=None, _frame=None) -> None:
@@ -81,20 +72,29 @@ def run_dev_processes(apps: list[str]) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, shutdown)
 
+    spawn = lambda name, cmd, cwd, env=None: spawn_in_terminal(
+        name, cmd, cwd, env, same_terminal=same_terminal
+    )
+
     if "backend" in apps:
         children.append(
             (
                 "backend",
-                spawn_process("backend", backend_command(), SYSTEM_DIR, build_backend_env()),
+                spawn("backend", backend_command(), SYSTEM_DIR, build_backend_env()),
             )
         )
     if "console" in apps:
-        children.append(("console", spawn_process("console", ["npm", "run", "dev"], CONSOLE_DIR)))
+        children.append(("console", spawn("console", ["npm", "run", "dev"], CONSOLE_DIR)))
     if "noma" in apps:
-        children.append(("noma", spawn_process("noma", ["npm", "run", "dev"], NOMA_DIR)))
+        children.append(("noma", spawn("noma", ["npm", "run", "dev"], NOMA_DIR)))
 
     if not children:
         return 0
+
+    if not same_terminal:
+        started = ", ".join(name for name, _ in children)
+        logger.info("Started in separate windows: %s", started)
+        logger.info("Press Ctrl+C in this terminal to stop all apps")
 
     exit_code = 0
     try:
@@ -114,7 +114,7 @@ def run_dev_processes(apps: list[str]) -> int:
     return exit_code
 
 
-def cmd_run(argv: list[str]) -> int:
+def cmd_run(argv: list[str], *, same_terminal: bool = False) -> int:
     apps, env_raw, handler_raw = parse_run_args(argv)
     app_set = set(apps)
     env_norm = normalize_env(env_raw)
@@ -131,7 +131,7 @@ def cmd_run(argv: list[str]) -> int:
     for path in result.written:
         logger.info("wrote %s", path)
 
-    return run_dev_processes(apps)
+    return run_dev_processes(apps, same_terminal=same_terminal)
 
 
 def cmd_check() -> int:
@@ -151,6 +151,11 @@ def main() -> int:
     parser.add_argument("tokens", nargs="*", help="e.g. noma console backend env:staging handler:local")
     parser.add_argument("--check", action="store_true", help="Validate catalog drift only")
     parser.add_argument("--verify", action="store_true", help="Run env generation verification matrix")
+    parser.add_argument(
+        "--same-terminal",
+        action="store_true",
+        help="Run all apps in this terminal instead of separate windows",
+    )
     args = parser.parse_args()
 
     if args.check:
@@ -160,7 +165,7 @@ def main() -> int:
     if not args.tokens:
         parser.print_help()
         return 1
-    return cmd_run(args.tokens)
+    return cmd_run(args.tokens, same_terminal=args.same_terminal)
 
 
 if __name__ == "__main__":

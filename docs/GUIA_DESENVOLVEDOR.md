@@ -12,7 +12,7 @@ Documento de referência para **devs novos e veteranos**. Substitui o fluxo anti
 
 | Item | Como verificar |
 |------|----------------|
-| Repositórios clonados | `system`, `console`, `NOMA`, `dev/renglo-api`, `dev/renglo-lib`, `extensions/backend` |
+| Repositórios clonados | `system`, `console`, `NOMA`, `renglo-api`, `renglo-lib`, `backend` (extensão) |
 | Python 3.12 + venv em `system/venv` | `C:\Noma\system\venv\Scripts\python.exe --version` |
 | Node.js | `node --version` |
 | AWS CLI profile `noma` | `aws configure list-profiles` |
@@ -40,9 +40,13 @@ cd C:\Noma\system
 .\run.ps1 noma console backend env:staging handler:local
 ```
 
-Isso **gera** os arquivos de config e **inicia** backend (porta 5001), console e NOMA.
+Isso **gera** os arquivos de config e **inicia** backend (porta 5001), console e NOMA — **cada app em uma janela de terminal separada**.
 
-Parar tudo: `Ctrl+C` no terminal.
+O terminal onde você rodou o `run` fica aberto **supervisionando** os processos.
+
+Parar tudo: `Ctrl+C` no **terminal orquestrador** (fecha todos os apps).
+
+Logs no mesmo terminal (debug rápido): adicione `--same-terminal` ao comando.
 
 ### 4. Conferir se está ok
 
@@ -156,6 +160,16 @@ cd C:\Noma\system
 
 Não precisa configurar alias.
 
+### Opção A2 — `run_stack.sh` (Linux / macOS)
+
+```bash
+cd /path/to/system
+chmod +x run_stack.sh   # só na primeira vez
+./run_stack.sh noma console backend env:staging handler:local
+```
+
+Equivalente ao `run.ps1` no Windows.
+
 ### Opção B — Python direto
 
 ```powershell
@@ -185,6 +199,47 @@ alias run='python /c/Noma/system/scripts/run.py'
 
 ---
 
+## Terminais separados
+
+Por padrão, cada app sobe em **sua própria janela** para evitar logs misturados:
+
+| App | Janela | Comando interno |
+|-----|--------|-----------------|
+| `backend` | `noma-backend` | `python main.py` |
+| `console` | `noma-console` | `npm run dev` |
+| `noma` | `noma-noma` | `npm run dev` |
+
+O terminal onde você executou `run` mostra:
+
+```text
+Started in separate windows: backend, console, noma
+Press Ctrl+C in this terminal to stop all apps
+```
+
+Use `--same-terminal` para o comportamento antigo (tudo no mesmo terminal):
+
+```powershell
+.\run.ps1 noma console backend env:staging handler:local --same-terminal
+```
+
+---
+
+## Layout flexível de repositórios
+
+O `run` localiza repositórios git pelo **nome da pasta** (case-insensitive), não exige paths fixos como `dev/` ou `extensions/`:
+
+| Repo | Nome buscado | Fallback padrão |
+|------|--------------|-----------------|
+| NOMA | `noma` | `<workspace>/NOMA` |
+| Console | `console` | `<workspace>/console` |
+| Renglo API | `renglo-api` | `<workspace>/dev/renglo-api` |
+| Renglo Lib | `renglo-lib` | `<workspace>/dev/renglo-lib` |
+| Backend ext. | `backend` (+ `package/noma`) | `<workspace>/extensions/backend` |
+
+A busca parte de `system/` e sobe até 2 níveis na árvore de pastas. Se seus clones estão em outro layout, basta que cada repo tenha `.git` e o nome correto.
+
+---
+
 ## Cenários do dia a dia
 
 | Objetivo | Comando |
@@ -197,6 +252,7 @@ alias run='python /c/Noma/system/scripts/run.py'
 | Frontends + API remota prod | `.\run.ps1 noma console env:prod handler:prod` |
 | Validar catálogo (sem AWS, sem servidores) | `.\venv\Scripts\python.exe scripts\run.py --verify` |
 | Ver variáveis resolvidas (revisão) | `.\venv\Scripts\python.exe scripts\show_env_scenarios.py` |
+| Logs no mesmo terminal | `.\run.ps1 ... --same-terminal` |
 
 ### O que esperar em cada combinação
 

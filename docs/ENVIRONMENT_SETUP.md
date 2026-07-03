@@ -22,6 +22,15 @@ cd C:\Noma\system
 .\run.ps1 noma console backend env:staging handler:local
 ```
 
+**Linux / macOS:**
+
+```bash
+cd /path/to/system
+./run_stack.sh noma console backend env:staging handler:local
+```
+
+Each app opens in a **separate terminal window** by default. The orchestrator terminal stays open; press **Ctrl+C** there to stop all apps. Use `--same-terminal` to keep everything in one window.
+
 **PowerShell alias** (profile or session):
 
 ```powershell
@@ -43,7 +52,7 @@ python C:\Noma\system\scripts\run.py noma env:staging handler:local
 ## Command grammar
 
 ```text
-run <apps...> env:<staging|prod> [handler:<local|staging|prod>]
+run <apps...> env:<staging|prod> [handler:<local|staging|prod>] [--same-terminal]
 run --check
 run --verify
 ```
@@ -74,7 +83,11 @@ run backend env:staging
 | `console` | `console/.env.development` |
 | `noma` | `NOMA/.env.local` |
 
-Backend starts with `venv\Scripts\python.exe main.py`, `PYTHONPATH` for `renglo-api`, `renglo-lib`, and `extensions/backend/package` (same as `_local_scratch/run_local.ps1`).
+Backend starts with `venv\Scripts\python.exe main.py`, `PYTHONPATH` for `renglo-api`, `renglo-lib`, and `extensions/backend/package`. Repos are discovered dynamically by git folder name (see GUIA for flexible layouts).
+
+## Separate terminals
+
+By default each app runs in its own window (`noma-backend`, `noma-console`, `noma-noma`). The `run` terminal supervises all processes; **Ctrl+C** there stops everything. Pass `--same-terminal` for single-window mode.
 
 ## Validation & inspection
 

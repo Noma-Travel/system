@@ -59,8 +59,24 @@ def _find_git_repo(name: str, fallback: Path, max_parent_hops: int = 2, max_chil
     return fallback
 
 
+def _find_backend_package() -> Path:
+    """Locate extensions/backend package dir (must contain noma/ handlers)."""
+    fallback = WORKSPACE_ROOT / "extensions" / "backend" / "package"
+    backend_repo = _find_git_repo("backend", fallback=WORKSPACE_ROOT / "extensions" / "backend")
+    package = backend_repo / "package"
+    if package.is_dir() and (package / "noma").is_dir():
+        return package
+    if fallback.is_dir() and (fallback / "noma").is_dir():
+        return fallback
+    return package if package.is_dir() else fallback
+
+
 NOMA_DIR = _find_git_repo("noma", fallback=WORKSPACE_ROOT / "NOMA")
 CONSOLE_DIR = _find_git_repo("console", fallback=WORKSPACE_ROOT / "console")
+RENGLO_API_DIR = _find_git_repo("renglo-api", fallback=WORKSPACE_ROOT / "dev" / "renglo-api")
+RENGLO_LIB_DIR = _find_git_repo("renglo-lib", fallback=WORKSPACE_ROOT / "dev" / "renglo-lib")
+BACKEND_EXT_DIR = _find_git_repo("backend", fallback=WORKSPACE_ROOT / "extensions" / "backend")
+NOMA_PACKAGE_DIR = _find_backend_package()
 
 BACKEND_ENV_CONFIG = SYSTEM_DIR / "env_config.py"
 BACKEND_ENV_DEVELOPMENT = SYSTEM_DIR / "env.development"

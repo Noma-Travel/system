@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from noma_env.paths import SYSTEM_DIR, WORKSPACE_ROOT
+from noma_env.paths import NOMA_PACKAGE_DIR, RENGLO_API_DIR, RENGLO_LIB_DIR, SYSTEM_DIR
 
 
 def build_backend_env(
@@ -17,17 +17,13 @@ def build_backend_env(
     env["AWS_PROFILE"] = aws_profile
     env["AWS_DEFAULT_REGION"] = aws_region
 
-    dev_api = WORKSPACE_ROOT / "dev" / "renglo-api"
-    dev_lib = WORKSPACE_ROOT / "dev" / "renglo-lib"
-    noma_pkg = WORKSPACE_ROOT / "extensions" / "backend" / "package"
-
     parts: list[str] = []
-    if noma_pkg.is_dir():
-        parts.append(str(noma_pkg))
-    if dev_api.is_dir():
-        parts.append(str(dev_api))
-    if dev_lib.is_dir():
-        parts.append(str(dev_lib))
+    if NOMA_PACKAGE_DIR.is_dir():
+        parts.append(str(NOMA_PACKAGE_DIR))
+    if RENGLO_API_DIR.is_dir():
+        parts.append(str(RENGLO_API_DIR))
+    if RENGLO_LIB_DIR.is_dir():
+        parts.append(str(RENGLO_LIB_DIR))
 
     if parts:
         existing = env.get("PYTHONPATH", "")
