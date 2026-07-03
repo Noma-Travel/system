@@ -37,6 +37,7 @@ __pycache__/
 
 # Local helper/config files
 env_config.py
+env.local
 zappa_settings.json
 zappa_settings_staging.json
 run.sh

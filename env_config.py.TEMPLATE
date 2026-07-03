@@ -44,6 +44,12 @@ S3_BUCKET_NAME = ''
 #OPEN AI
 OPENAI_API_KEY=''
 
+# Langfuse LLM observability (self-hosted). Leave blank to disable tracing.
+#   LANGFUSE_HOST: base URL of your Langfuse instance, e.g. http://localhost:3000
+LANGFUSE_PUBLIC_KEY=''
+LANGFUSE_SECRET_KEY=''
+LANGFUSE_HOST=''
+
 # Invite / transactional email (Resend)
 RESEND_API_KEY=''
 INVITE_FROM='Noma <noreply@example.com>'
