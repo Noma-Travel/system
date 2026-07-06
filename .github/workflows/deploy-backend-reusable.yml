@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      system_git_ref:
+        description: Git ref of the system repo to checkout (e.g. main, staging)
+        required: false
+        type: string
+        default: main
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -35,6 +40,7 @@ jobs:
         run: |
           echo "Zappa stage: ${{ inputs.zappa_stage }}"
           echo "Requirements: ${{ inputs.requirements_file }}"
+          echo "System git ref: ${{ inputs.system_git_ref }}"
           echo "Event: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             echo "Triggered by: ${{ github.event.client_payload.triggered_by }}"
@@ -44,6 +50,8 @@ jobs:
 
       - name: Checkout system repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.system_git_ref }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

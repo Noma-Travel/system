@@ -1,10 +1,10 @@
 # Non-secret defaults for env:prod
 WL_NAME: Noma
 URL_PREFIX: noma_prod
-BASE_URL: https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod
+BASE_URL: ""
 DOC_BASE_URL: https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod
-FE_BASE_URL: https://www.travelwithnoma.com
-APP_FE_BASE_URL: https://www.travelwithnoma.com
+FE_BASE_URL: https://app.travelwithnoma.com
+APP_FE_BASE_URL: https://app.travelwithnoma.com
 API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:u8za3vvgbb
 SYS_ENV: noma_prod
 AGENT_LANGUAGE: en
@@ -23,8 +23,8 @@ S3_BUCKET_NAME: noma-prod-44841892
 WEBSOCKET_CONNECTIONS: https://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production
 ALLOW_DEV_ORIGINS: "false"
 CORS_ALLOWED_ORIGINS: https://app.travelwithnoma.com,https://www.travelwithnoma.com,https://travelwithnoma.com
-INVITE_FROM: Noma <noreply@travelwithnoma.com>
-SES_INVITE_SENDER: noreply@travelwithnoma.com
+INVITE_FROM: Noma <noreply@email.travelwithnoma.com>
+SES_INVITE_SENDER: noreply@email.travelwithnoma.com
 NEXT_PUBLIC_MS_REDIRECT_URI: https://app.travelwithnoma.com/dashboard/settings/calendar/callback
 VITE_EXTENSIONS: schd,data,backend
 VITE_WL_LOGO: /small_logo.jpg

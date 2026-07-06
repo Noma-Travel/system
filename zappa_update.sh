@@ -453,8 +453,9 @@ if [[ -f "$REQ_CI_FILE" ]]; then
   echo "    Verifying CI package imports..."
   # find_spec only checks install layout; importing renglo_api runs create_app() and needs Cognito env.
   "$DEPLOY_PYTHON" -c "import importlib.util
-for mod in ('renglo_api', 'renglo', 'noma'):
+for mod in ('renglo_api', 'renglo', 'noma', 'langfuse'):
     assert importlib.util.find_spec(mod), mod
+from langfuse.openai import OpenAI  # noqa: F401 — required at Lambda cold start via agent_utilities
 print('    CI packages import OK')" || {
     echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv" >&2
     exit 1
