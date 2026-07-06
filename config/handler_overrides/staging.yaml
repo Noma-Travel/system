@@ -1,0 +1,2 @@
+# handler:staging — use staging API Gateway URLs (resolved from profile after merge)
+# Empty: inherit BASE_URL / WEBSOCKET_CONNECTIONS from profiles/staging.yaml

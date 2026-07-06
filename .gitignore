@@ -37,6 +37,11 @@ __pycache__/
 
 # Local helper/config files
 env_config.py
+config/local.override.yaml
+config/secrets/*.json
+!config/secrets/*.example
+!config/secrets/README.md
+docs/confluence/
 zappa_settings.json
 zappa_settings_staging.json
 run.sh

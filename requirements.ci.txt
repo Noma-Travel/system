@@ -1,6 +1,9 @@
 # CI/CD requirements - installs dependency packages from GitHub repos
 # Used by GitHub Actions workflow (local dev uses requirements.txt with local paths)
 
+# Explicit: renglo-lib imports langfuse at module load; must be in the Lambda zip (Zappa --target layout).
+langfuse>=3.0,<5
+
 git+https://github.com/Noma-Travel/renglo-lib.git@main#egg=renglo-lib
 git+https://github.com/Noma-Travel/renglo-api.git@main#egg=renglo-api
 git+https://github.com/Noma-Travel/backend.git@main#egg=noma-mod&subdirectory=package

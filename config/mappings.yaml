@@ -1,0 +1,19 @@
+# Canonical backend keys -> app-specific env names (same value after merge)
+COGNITO_USERPOOL_ID:
+  noma: NEXT_PUBLIC_AWS_USER_POOL_ID
+  console: VITE_COGNITO_USERPOOL_ID
+
+COGNITO_APP_CLIENT_ID:
+  noma: NEXT_PUBLIC_AWS_USER_POOL_CLIENT_ID
+  console: VITE_COGNITO_APP_CLIENT_ID
+
+COGNITO_REGION:
+  console: VITE_COGNITO_REGION
+
+BASE_URL:
+  noma: NEXT_PUBLIC_API_BASE_URL
+  console: VITE_API_URL
+
+WEBSOCKET_CONNECTIONS:
+  noma: NEXT_PUBLIC_CHAT_WS
+  console: VITE_WEBSOCKET_URL
