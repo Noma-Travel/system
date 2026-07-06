@@ -1,5 +1,9 @@
 # handler:local — route API/WS to local processes
 BASE_URL: http://127.0.0.1:5001
+# Frontend URL used to build links (e.g. invite emails) — must point at the
+# local Next.js dev server, not BASE_URL (that's the API/backend route).
+FE_BASE_URL: http://127.0.0.1:3000
+APP_FE_BASE_URL: http://127.0.0.1:3000
 NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:5001
 NEXT_PUBLIC_VITE_API_URL: http://127.0.0.1:5001
 VITE_API_URL: http://127.0.0.1:5001
