@@ -1,7 +1,7 @@
 # Non-secret defaults for env:staging (from zappa_settings_staging.json + STAGING_GUIDE)
 WL_NAME: Noma Staging
 URL_PREFIX: noma_staging
-BASE_URL: https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging
+BASE_URL: ""
 DOC_BASE_URL: https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging
 FE_BASE_URL: https://staging.travelwithnoma.com
 APP_FE_BASE_URL: https://staging.travelwithnoma.com
@@ -23,8 +23,8 @@ PREVIEW_LAYER: "2"
 S3_BUCKET_NAME: noma-staging-42067270
 WEBSOCKET_CONNECTIONS: https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/production
 ALLOW_DEV_ORIGINS: "true"
-INVITE_FROM: Noma Staging <noreply@travelwithnoma.com>
-SES_INVITE_SENDER: noreply@travelwithnoma.com
+INVITE_FROM: Noma <noreply@email.travelwithnoma.com>
+SES_INVITE_SENDER: noreply@email.travelwithnoma.com
 VITE_EXTENSIONS: schd,data,backend
 VITE_WL_LOGO: /small_logo.jpg
 VITE_WL_LOGIN: /large_logo.jpg
