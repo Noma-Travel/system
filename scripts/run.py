@@ -95,7 +95,7 @@ def free_ports(apps: list[str]) -> None:
                 pass
 
 
-def run_dev_processes(apps: list[str]) -> int:
+def run_dev_processes(apps: list[str], *, same_terminal: bool = False) -> int:
     free_ports(apps)
     children: list[tuple[str, subprocess.Popen]] = []
 
