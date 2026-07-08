@@ -217,15 +217,30 @@ flowchart TB
 
 ---
 
-## Frontend failure notifications
+## Deploy notifications (success + failure)
 
-Same channel as backend: **Resend email** to commit author + **Slack `#deployments`**.
+All notifications flow through one reusable workflow: [`notify-deploy.yml`](.github/workflows/notify-deploy.yml)
+(`outcome: success|failure`, `alert_type: deploy|ci_gate`). **Slack `#deployments`** always;
+**Resend email** to the commit author on failure only. Branch is resolved from the source
+event (`workflow_run.head_branch` / `client_payload.branch`), not `GITHUB_REF_NAME`, so
+staging alerts correctly show `staging`. On failure the workflow uses `GH_PAT` to pull the
+failed run's jobs + log lines into the message.
 
-| Failure source | Workflow | Auto-trigger? | Secrets on `NOMA` repo |
-|----------------|----------|---------------|-------------------------|
-| GitHub `e2e.yml` (build / e2e-smoke) | `notify-e2e-failure.yml` | **Yes** — `workflow_run` on "Build and E2E" | `RESEND_API_KEY`, `DEPLOY_ALERT_FROM`, `SLACK_DEPLOY_TEAM_WEBHOOK_URL`, `GH_PAT`, `USER_EMAIL_MAP` |
-| Amplify BUILD / DEPLOY / VERIFY | `notify-amplify-failure.yml` | **Yes** — after EventBridge wiring (below) | Same secrets |
-| Backend Zappa / post_deploy | `system/notify-*-deploy-failure.yml` | **Yes** | Secrets on `system` repo |
+| Source | Outcome | Workflow | Trigger |
+|--------|---------|----------|---------|
+| GitHub `e2e.yml` (build-and-e2e-smoke) | failure | `NOMA/notify-e2e-failure.yml` (`alert_type: ci_gate`) | `workflow_run` on "Build and E2E" |
+| Amplify deploy | failure | `NOMA/notify-amplify-failure.yml` | EventBridge `SUCCEED`/`FAILED` → Lambda → `amplify-build-failed` |
+| Amplify deploy | success | `NOMA/notify-amplify-success.yml` | EventBridge → Lambda → `amplify-build-succeeded` |
+| Backend Zappa / post_deploy | failure | `system/notify-*-deploy-failure.yml` | `workflow_run` on deploy workflow |
+| Backend Zappa / post_deploy | success | `system/notify-*-deploy-success.yml` | `workflow_run` on deploy workflow |
+
+`notify-deploy-failure.yml` is kept as a thin backward-compatible wrapper that calls
+`notify-deploy.yml` with `outcome: failure`.
+
+The Amplify Lambda ([`lambda/amplify_github_notify/handler.py`](lambda/amplify_github_notify/handler.py))
+now dispatches both `amplify-build-failed` (FAILED) and `amplify-build-succeeded` (SUCCEED);
+re-run [`scripts/setup_amplify_github_notify.py`](scripts/setup_amplify_github_notify.py) to
+update the EventBridge pattern (`jobStatus: ["FAILED", "SUCCEED"]`) and Lambda code.
 
 ### Amplify → GitHub notify wiring
 
@@ -247,7 +262,7 @@ sequenceDiagram
   N->>GH: Resend email to commit author
 ```
 
-**Dispatch payload example** (Lambda or script posts to GitHub API):
+**Dispatch payload example** (Lambda posts to GitHub API):
 
 ```json
 {
@@ -256,13 +271,39 @@ sequenceDiagram
     "environment_label": "staging",
     "branch": "staging",
     "job_id": "6",
-    "commit_sha": "…",
-    "commit_author_email": "…"
+    "sha": "…",
+    "commit_message": "…",
+    "commit_author_email": "…",
+    "triggered_by": "github-login",
+    "source_repo": "Noma-Travel/NOMA",
+    "run_url": "https://us-east-1.console.aws.amazon.com/amplify/home?region=us-east-1#d1f1y2ixvuy9lc/staging/6"
   }
 }
 ```
 
-Until EventBridge is wired, Amplify failures are visible in the [Amplify Console](https://us-east-1.console.aws.amazon.com/amplify/apps) only. Copy the same secrets from `system` to `NOMA` before enabling notify workflows.
+### One-time AWS wiring (EventBridge → Lambda → GitHub)
+
+Infra lives in [`system/lambda/amplify_github_notify/handler.py`](lambda/amplify_github_notify/handler.py) and [`system/scripts/setup_amplify_github_notify.py`](scripts/setup_amplify_github_notify.py).
+
+| Resource | Name |
+|----------|------|
+| EventBridge rule | `noma-amplify-build-failed` — `aws.amplify` / `Amplify Deployment Status Change` / `jobStatus: FAILED` / app `d1f1y2ixvuy9lc` |
+| Lambda | `noma-amplify-github-notify` |
+| Secrets Manager | `noma/amplify-github-notify` — JSON `{"GITHUB_TOKEN": "<same as NOMA GH_PAT>"}` |
+| GitHub target | `POST /repos/Noma-Travel/NOMA/dispatches` → `notify-amplify-failure.yml` |
+
+```bash
+cd system
+# Use the same PAT stored as NOMA repo secret GH_PAT (needs repo + workflow scope)
+python scripts/setup_amplify_github_notify.py --profile noma --github-token "$GITHUB_TOKEN"
+
+# Smoke-test without waiting for a failed Amplify build:
+python scripts/setup_amplify_github_notify.py --test-dispatch --github-token "$GITHUB_TOKEN"
+```
+
+After `--test-dispatch`, open [NOMA Actions](https://github.com/Noma-Travel/NOMA/actions/workflows/notify-amplify-failure.yml) — you should see a run and Slack/email (if secrets are set on NOMA).
+
+Branch → `environment_label`: `staging` → `staging (NOMA Amplify)`, `main` → `prod (NOMA Amplify)`.
 
 ---
 
@@ -337,7 +378,7 @@ After promotion: `GET …/noma_prod/ping` → `{"pong":true}`, spot-check prod a
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Amplify BUILD fails on Cypress | WEB_COMPUTE ignores `test:` phase | Tests in **build** phase — [`amplify.yml`](../NOMA/amplify.yml) |
-| No Slack on Amplify fail | EventBridge → `repository_dispatch` not wired | See § Amplify → GitHub notify wiring |
+| No Slack on Amplify fail | EventBridge/Lambda misconfigured or wrong `GITHUB_TOKEN` in Secrets Manager | Re-run `setup_amplify_github_notify.py`; see § Amplify → GitHub notify wiring |
 | No Slack on `e2e.yml` fail | Secrets missing on `NOMA` | Copy from `system`; enable `notify-e2e-failure.yml` |
 | `e2e-smoke` passes but Amplify fails | Different suites (smoke ⊂ nonchat) | Check Amplify BUILD log for failing spec |
 | Chat WebSocket HTTP 500 | Missing `$connect` MOCK responses | Launcher `create_websocket_api.py` |
