@@ -33,6 +33,8 @@ SCENARIOS = [
         "handler": "prod",
         "apps": ["noma", "console"],
         "assertions": {
+            "BASE_URL": "",
+            "APP_FE_BASE_URL": "https://app.travelwithnoma.com",
             "NEXT_PUBLIC_API_BASE_URL": "https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod",
             "VITE_API_URL": "https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod",
             "COGNITO_USERPOOL_ID": "us-east-1_yydZGkq4N",
@@ -44,6 +46,8 @@ SCENARIOS = [
         "handler": "staging",
         "apps": ["console"],
         "assertions": {
+            "BASE_URL": "",
+            "APP_FE_BASE_URL": "https://staging.travelwithnoma.com",
             "VITE_API_URL": "https://2r4dlx8qdj.execute-api.us-east-1.amazonaws.com/noma_staging",
         },
     },

@@ -1,1 +1,4 @@
-# handler:prod — use production API Gateway URLs (inherit from profiles/production.yaml)
+# handler:prod — frontends call remote API Gateway (profile keeps BASE_URL empty for invite links)
+NEXT_PUBLIC_API_BASE_URL: https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod
+NEXT_PUBLIC_VITE_API_URL: https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod
+VITE_API_URL: https://u8za3vvgbb.execute-api.us-east-1.amazonaws.com/noma_prod

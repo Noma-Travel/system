@@ -89,6 +89,12 @@ Backend starts with `venv\Scripts\python.exe main.py`, `PYTHONPATH` for `renglo-
 
 By default each app runs in its own window (`noma-backend`, `noma-console`, `noma-noma`). The `run` terminal supervises all processes; **Ctrl+C** there stops everything. Pass `--same-terminal` for single-window mode.
 
+## Local WebSocket (WSS)
+
+With `handler:local`, `run` automatically starts the dev WebSocket service (`extensions/wss/dev_ws_service.py`) at `ws://127.0.0.1:8080/ws` in its own window (`noma-wss`) — the same URL injected by `handler_overrides/local.yaml`. It is supervised like the other apps and stops on Ctrl+C.
+
+Prerequisite (one time): clone the `wss` repo and create its venv (`python -m venv wss-venv` + `pip install -r requirements.txt`). If the repo or venv is missing, `run` logs a warning and continues without local WebSocket. With `handler:staging`/`handler:prod` the local WSS is not started (remote API Gateway is used).
+
 ## Validation & inspection
 
 ```bash

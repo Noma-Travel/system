@@ -77,6 +77,7 @@ RENGLO_API_DIR = _find_git_repo("renglo-api", fallback=WORKSPACE_ROOT / "dev" / 
 RENGLO_LIB_DIR = _find_git_repo("renglo-lib", fallback=WORKSPACE_ROOT / "dev" / "renglo-lib")
 BACKEND_EXT_DIR = _find_git_repo("backend", fallback=WORKSPACE_ROOT / "extensions" / "backend")
 NOMA_PACKAGE_DIR = _find_backend_package()
+WSS_DIR = _find_git_repo("wss", fallback=WORKSPACE_ROOT / "extensions" / "wss")
 
 BACKEND_ENV_CONFIG = SYSTEM_DIR / "env_config.py"
 BACKEND_ENV_DEVELOPMENT = SYSTEM_DIR / "env.development"
