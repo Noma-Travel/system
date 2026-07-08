@@ -18,8 +18,9 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from noma_env.backend_launcher import backend_command, build_backend_env
 from noma_env.envgen import default_handler_for_apps, generate
-from noma_env.paths import CONSOLE_DIR, NOMA_DIR, SYSTEM_DIR, VALID_APPS, normalize_env
+from noma_env.paths import CONSOLE_DIR, NOMA_DIR, SYSTEM_DIR, VALID_APPS, WSS_DIR, normalize_env
 from noma_env.terminal_spawn import spawn_in_terminal
+from noma_env.wss_launcher import can_start_wss, wss_command
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("run")
@@ -66,7 +67,7 @@ def spawn_process(name: str, cmd: list[str], cwd: Path, env: dict[str, str] | No
 
 # Dev ports each app binds to. Freed automatically before launch so a stale
 # process from a previous run never forces the app onto a different port.
-APP_PORTS: dict[str, int] = {"noma": 3000, "console": 5174, "backend": 5001}
+APP_PORTS: dict[str, int] = {"noma": 3000, "console": 5174, "backend": 5001, "wss": 8080}
 
 
 def free_ports(apps: list[str]) -> None:
@@ -95,8 +96,9 @@ def free_ports(apps: list[str]) -> None:
                 pass
 
 
-def run_dev_processes(apps: list[str], *, same_terminal: bool = False) -> int:
-    free_ports(apps)
+def run_dev_processes(apps: list[str], *, handler: str = "", same_terminal: bool = False) -> int:
+    start_wss = handler == "local"
+    free_ports(apps + (["wss"] if start_wss else []))
     children: list[tuple[str, subprocess.Popen]] = []
 
     def shutdown(_signum=None, _frame=None) -> None:
@@ -129,6 +131,13 @@ def run_dev_processes(apps: list[str], *, same_terminal: bool = False) -> int:
         children.append(("console", spawn("console", ["npm", "run", "dev"], CONSOLE_DIR)))
     if "noma" in apps:
         children.append(("noma", spawn("noma", ["npm", "run", "dev"], NOMA_DIR)))
+    if start_wss:
+        cmd = wss_command()
+        if cmd:
+            children.append(("wss", spawn("wss", cmd, WSS_DIR)))
+        else:
+            _, reason = can_start_wss()
+            logger.warning("wss not started: %s", reason)
 
     if not children:
         return 0
@@ -173,7 +182,7 @@ def cmd_run(argv: list[str], *, same_terminal: bool = False) -> int:
     for path in result.written:
         logger.info("wrote %s", path)
 
-    return run_dev_processes(apps, same_terminal=same_terminal)
+    return run_dev_processes(apps, handler=handler_norm, same_terminal=same_terminal)
 
 
 def cmd_check() -> int:

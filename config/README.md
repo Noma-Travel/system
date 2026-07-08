@@ -37,4 +37,6 @@ cd /path/to/system
 
 Each app opens in a separate terminal window by default; use `--same-terminal` for single-window mode.
 
+With `handler:local`, `run` also starts the local WebSocket service (`extensions/wss`) automatically in a `noma-wss` window; if the `wss` repo or its `wss-venv` is missing, it warns and continues.
+
 Generation is **only** triggered by `run` (via internal `envgen` module). There is no separate setup command.
