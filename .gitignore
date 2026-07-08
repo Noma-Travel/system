@@ -30,6 +30,7 @@ werkzeug/
 .werkzeug_vendored_for_zappa
 handler_venv/
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
