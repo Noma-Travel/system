@@ -1,0 +1,29 @@
+name: Notify Production Deploy Success
+
+# Runs after "Deploy Backend (Production)" completes successfully; posts a Slack
+# success alert to #deployments (no email on success).
+
+on:
+  workflow_run:
+    workflows: ["Deploy Backend (Production)"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: ./.github/workflows/notify-deploy.yml
+    with:
+      environment_label: production
+      outcome: success
+      alert_type: deploy
+    secrets:
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
+      SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}

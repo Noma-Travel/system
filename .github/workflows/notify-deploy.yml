@@ -1,0 +1,446 @@
+name: Notify Deploy (reusable)
+
+# Unified deploy/CI notification. Handles both success and failure for:
+#   - Backend Zappa deploy (workflow_run)
+#   - Frontend Amplify deploy (repository_dispatch from Lambda)
+#   - Frontend GitHub CI gate / e2e.yml (workflow_run)
+# Sends Slack (#deployments) always; sends Resend email to the commit author on failure only.
+#
+# Branch/repo are resolved from the SOURCE event (workflow_run.head_branch /
+# client_payload.branch), NOT from GITHUB_REF_NAME (which is always the default
+# branch for workflow_run / repository_dispatch triggered runs).
+
+on:
+  workflow_call:
+    inputs:
+      environment_label:
+        description: Human-readable environment (e.g. production, staging (NOMA Amplify))
+        required: true
+        type: string
+      outcome:
+        description: "success | failure"
+        required: true
+        type: string
+      alert_type:
+        description: "deploy | ci_gate — controls wording (deploy failed vs CI gate failed)"
+        required: false
+        type: string
+        default: deploy
+      deploy_result:
+        description: Result of the primary job (success, failure, skipped, etc.)
+        required: false
+        type: string
+        default: ""
+      post_deploy_result:
+        description: Result of the secondary job
+        required: false
+        type: string
+        default: ""
+      primary_job_label:
+        description: Label for the first monitored job in failure messages
+        required: false
+        type: string
+        default: deploy (Zappa)
+      secondary_job_label:
+        description: Label for the second monitored job in failure messages
+        required: false
+        type: string
+        default: post_deploy (blueprints/tools)
+    secrets:
+      RESEND_API_KEY:
+        required: false
+      DEPLOY_ALERT_FROM:
+        required: false
+      SLACK_DEPLOY_TEAM_WEBHOOK_URL:
+        required: false
+      GH_PAT:
+        required: false
+      USER_EMAIL_MAP:
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve author and build notification payload
+        id: meta
+        env:
+          OUTCOME: ${{ inputs.outcome }}
+          ALERT_TYPE: ${{ inputs.alert_type }}
+          DEPLOY_RESULT: ${{ inputs.deploy_result }}
+          POST_DEPLOY_RESULT: ${{ inputs.post_deploy_result }}
+          ENVIRONMENT_LABEL: ${{ inputs.environment_label }}
+          PRIMARY_JOB_LABEL: ${{ inputs.primary_job_label }}
+          SECONDARY_JOB_LABEL: ${{ inputs.secondary_job_label }}
+          USER_EMAIL_MAP: ${{ secrets.USER_EMAIL_MAP }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, "r", encoding="utf-8") as fh:
+              event = json.load(fh)
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          outcome = (os.environ.get("OUTCOME") or "failure").strip().lower()
+          alert_type = (os.environ.get("ALERT_TYPE") or "deploy").strip().lower()
+
+          author_email = ""
+          author_login = ""
+          commit_sha = os.environ.get("GITHUB_SHA", "")
+          commit_message = ""
+          source_repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_url = ""
+          # Branch + repo of the SOURCE event (fixes wrong-branch bug).
+          source_ref = os.environ.get("GITHUB_REF_NAME", "")
+          source_repo_full = os.environ.get("GITHUB_REPOSITORY", "")
+          wr_run_id = ""
+
+          if event_name == "repository_dispatch":
+              payload = event.get("client_payload") or {}
+              author_email = str(payload.get("commit_author_email") or "").strip()
+              author_login = str(payload.get("triggered_by") or "").strip()
+              commit_sha = str(payload.get("sha") or commit_sha).strip()
+              commit_message = str(payload.get("commit_message") or "").strip()
+              source_repo = str(payload.get("source_repo") or source_repo).strip()
+              source_repo_full = str(payload.get("source_repo") or source_repo_full).strip()
+              run_url = str(payload.get("run_url") or run_url).strip()
+              if payload.get("branch"):
+                  source_ref = str(payload.get("branch")).strip()
+          elif event_name == "push":
+              head = event.get("head_commit") or {}
+              author = head.get("author") or {}
+              author_email = str(author.get("email") or "").strip()
+              author_login = str(author.get("username") or "").strip()
+              commit_message = str(head.get("message") or "").strip()
+          elif event_name == "pull_request":
+              user = (event.get("pull_request") or {}).get("user") or {}
+              author_login = str(user.get("login") or "").strip()
+              head = (event.get("pull_request") or {}).get("head") or {}
+              commit_sha = str(head.get("sha") or commit_sha).strip()
+          elif event_name == "workflow_run":
+              wr = event.get("workflow_run") or {}
+              head = wr.get("head_commit") or {}
+              author = head.get("author") or {}
+              author_email = str(author.get("email") or "").strip()
+              author_login = str(author.get("username") or author.get("name") or "").strip()
+              commit_sha = str(wr.get("head_sha") or commit_sha).strip()
+              commit_message = str(head.get("message") or "").strip()
+              run_url = str(wr.get("html_url") or "").strip()
+              if wr.get("head_branch"):
+                  source_ref = str(wr.get("head_branch")).strip()
+              wr_repo = str(wr.get("repository", {}).get("full_name") or source_repo).strip()
+              if wr_repo:
+                  source_repo_full = wr_repo
+                  source_repo = wr_repo
+              wr_run_id = str(wr.get("id") or "").strip()
+
+          def is_noreply(email: str) -> bool:
+              return not email or "noreply.github.com" in email.lower()
+
+          def gh_api(url: str, raw: bool = False):
+              token = os.environ.get("GH_TOKEN")
+              if not token:
+                  return None
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "noma-deploy-notify",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=25) as resp:
+                  data = resp.read()
+              if raw:
+                  return data
+              return json.loads(data.decode("utf-8"))
+
+          # -------- Author email resolution (unchanged behaviour) --------
+          if is_noreply(author_email) and author_login:
+              mapping_raw = os.environ.get("USER_EMAIL_MAP", "").strip()
+              if mapping_raw:
+                  try:
+                      mapping = json.loads(mapping_raw)
+                      author_email = str(mapping.get(author_login, "")).strip()
+                  except json.JSONDecodeError:
+                      pass
+              if is_noreply(author_email) and os.environ.get("GH_TOKEN"):
+                  try:
+                      data = gh_api(f"https://api.github.com/users/{author_login}")
+                      author_email = str((data or {}).get("email") or "").strip()
+                  except Exception as exc:
+                      print(f"Could not resolve email via GitHub API: {exc}")
+
+          if event_name == "workflow_run" and os.environ.get("GH_TOKEN") and commit_sha:
+              repo_for_commit = source_repo_full or source_repo
+              if repo_for_commit:
+                  try:
+                      commit_data = gh_api(
+                          f"https://api.github.com/repos/{repo_for_commit}/commits/{commit_sha}"
+                      ) or {}
+                      gh_author = commit_data.get("author") or {}
+                      if gh_author.get("login"):
+                          author_login = str(gh_author["login"]).strip()
+                      commit_author = (commit_data.get("commit") or {}).get("author") or {}
+                      if is_noreply(author_email) and commit_author.get("email"):
+                          author_email = str(commit_author["email"]).strip()
+                  except Exception as exc:
+                      print(f"Could not resolve commit author via GitHub API: {exc}")
+
+          # -------- Failure step + log extraction (workflow_run only) --------
+          ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+          TS_RE = re.compile(r"^\S*\d{4}-\d{2}-\d{2}T[0-9:.]+Z\s?")
+
+          def clean_line(line: str) -> str:
+              line = ANSI_RE.sub("", line)
+              line = TS_RE.sub("", line)
+              return line.rstrip()
+
+          def extract_error_lines(text: str, limit: int = 3):
+              errors, cypress, generic = [], [], []
+              for raw in text.splitlines():
+                  ln = clean_line(raw)
+                  if not ln:
+                      continue
+                  low = ln.lower()
+                  if "##[error]" in low:
+                      errors.append(ln.replace("##[error]", "").strip())
+                  elif ("\u2716" in ln) or ("failing" in low) or (" failed (" in low):
+                      cypress.append(ln.strip())
+                  elif low.startswith("error") or "exit code" in low or "typeerror" in ln or "traceback" in low:
+                      generic.append(ln.strip())
+              ordered = []
+              for bucket in (errors, cypress, generic):
+                  for item in bucket:
+                      if item and item not in ordered:
+                          ordered.append(item)
+                      if len(ordered) >= limit:
+                          return ordered
+              return ordered
+
+          failed_jobs = []       # list of "job -> step"
+          error_lines = []
+          if outcome == "failure" and event_name == "workflow_run" and wr_run_id and os.environ.get("GH_TOKEN"):
+              repo_for_jobs = source_repo_full or source_repo
+              try:
+                  jobs_data = gh_api(
+                      f"https://api.github.com/repos/{repo_for_jobs}/actions/runs/{wr_run_id}/jobs"
+                  ) or {}
+                  for job in jobs_data.get("jobs", []):
+                      if job.get("conclusion") != "failure":
+                          continue
+                      job_name = str(job.get("name") or "job").strip()
+                      failed_steps = [
+                          str(s.get("name") or "").strip()
+                          for s in (job.get("steps") or [])
+                          if s.get("conclusion") == "failure"
+                      ]
+                      step_label = failed_steps[0] if failed_steps else "?"
+                      failed_jobs.append(f"job {job_name} \u2192 step {step_label}")
+                      if not error_lines and job.get("id"):
+                          try:
+                              log_bytes = gh_api(
+                                  f"https://api.github.com/repos/{repo_for_jobs}/actions/jobs/{job['id']}/logs",
+                                  raw=True,
+                              )
+                              text = ""
+                              if log_bytes:
+                                  try:
+                                      text = log_bytes.decode("utf-8", errors="replace")
+                                  except Exception:
+                                      text = ""
+                              if text:
+                                  error_lines = extract_error_lines(text)
+                          except Exception as exc:
+                              print(f"Could not fetch job logs: {exc}")
+              except Exception as exc:
+                  print(f"Could not fetch run jobs: {exc}")
+
+          # -------- Failure summary (fallback to static labels) --------
+          deploy_result = os.environ.get("DEPLOY_RESULT", "")
+          post_result = os.environ.get("POST_DEPLOY_RESULT", "")
+          primary_label = os.environ.get("PRIMARY_JOB_LABEL", "deploy")
+          secondary_label = os.environ.get("SECONDARY_JOB_LABEL", "post_deploy")
+          if failed_jobs:
+              failed_summary = "; ".join(failed_jobs)
+          else:
+              parts = []
+              if deploy_result == "failure":
+                  parts.append(primary_label)
+              if post_result == "failure":
+                  parts.append(secondary_label)
+              failed_summary = ", ".join(parts) or primary_label
+
+          # Prefer the source run URL (workflow_run.html_url or Amplify console URL from
+          # the dispatch payload). Only fall back to the current run when neither exists.
+          if not run_url:
+              run_url = (
+                  f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
+                  f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+              )
+
+          env_label = os.environ.get("ENVIRONMENT_LABEL", "unknown")
+          workflow = os.environ.get("GITHUB_WORKFLOW", "workflow")
+          repo = source_repo_full or os.environ.get("GITHUB_REPOSITORY", "")
+          ref = source_ref or os.environ.get("GITHUB_REF_NAME", "")
+
+          verb = "CI gate" if alert_type == "ci_gate" else "deploy"
+
+          # -------- Build messages --------
+          if outcome == "success":
+              subject = f"[OK] {env_label} {verb} succeeded — {repo}@{ref}"
+              body_lines = [
+                  f"{verb.capitalize()} succeeded in {env_label}.",
+                  f"Workflow: {workflow}",
+                  f"Repository: {repo}",
+                  f"Branch/ref: {ref}",
+                  f"Author: {author_login or 'unknown'}",
+                  f"Commit: {commit_sha[:12] if commit_sha else 'n/a'}",
+                  f"Message: {commit_message[:500] if commit_message else 'n/a'}",
+                  f"Run: {run_url}",
+              ]
+              slack_text = (
+                  f":white_check_mark: *{env_label} {verb} succeeded* — `{repo}` (`{ref}`)\n"
+                  f"*Author:* {author_login or 'unknown'}"
+                  + f"\n*Commit:* `{commit_sha[:12] if commit_sha else 'n/a'}`"
+                  + (f" — {commit_message[:200]}" if commit_message else "")
+                  + f"\n<{run_url}|View run>"
+              )
+          else:
+              subject = f"[FAILED] {env_label} {verb} — {repo}@{ref}"
+              body_lines = [
+                  f"{verb.capitalize()} failed in {env_label}.",
+                  f"Workflow: {workflow}",
+                  f"Repository: {repo}",
+                  f"Branch/ref: {ref}",
+                  f"Failed step(s): {failed_summary}",
+              ]
+              if error_lines:
+                  body_lines.append("Error:")
+                  body_lines.extend(f"  {ln}" for ln in error_lines)
+              body_lines += [
+                  f"Author: {author_login or 'unknown'}",
+                  f"Commit: {commit_sha[:12] if commit_sha else 'n/a'}",
+                  f"Message: {commit_message[:500] if commit_message else 'n/a'}",
+                  f"Source repo: {source_repo}",
+                  f"Run: {run_url}",
+              ]
+              error_block = ""
+              if error_lines:
+                  joined = "\n".join(f"  {ln[:200]}" for ln in error_lines)
+                  error_block = f"\n*Error:*\n```{joined}```"
+              note = ""
+              if alert_type == "ci_gate":
+                  note = "\n_Note: Amplify deploy may still succeed; this is the GitHub Actions gate._"
+              slack_text = (
+                  f":x: *{env_label} {verb} failed* — `{repo}` (`{ref}`)\n"
+                  f"*Failed:* {failed_summary}"
+                  + error_block
+                  + f"\n*Author:* {author_login or 'unknown'}"
+                  + (f" ({author_email})" if author_email and not is_noreply(author_email) else "")
+                  + f"\n*Commit:* `{commit_sha[:12] if commit_sha else 'n/a'}`"
+                  + (f" — {commit_message[:200]}" if commit_message else "")
+                  + note
+                  + f"\n<{run_url}|View GitHub Actions run>"
+              )
+
+          body_text = "\n".join(body_lines)
+          # Send email only on failure (avoid spamming authors on every success).
+          send_email = outcome == "failure" and bool(author_email) and not is_noreply(author_email)
+
+          out = os.environ.get("GITHUB_OUTPUT")
+          with open(out, "a", encoding="utf-8") as fh:
+              fh.write(f"author_email={author_email}\n")
+              fh.write(f"author_login={author_login}\n")
+              fh.write(f"subject<<EOF\n{subject}\nEOF\n")
+              fh.write(f"body<<EOF\n{body_text}\nEOF\n")
+              fh.write(f"slack_text<<EOF\n{slack_text}\nEOF\n")
+              fh.write(f"has_deliverable_email={'true' if send_email else 'false'}\n")
+
+          print(body_text)
+          PY
+
+      - name: Email commit author (Resend)
+        if: steps.meta.outputs.has_deliverable_email == 'true'
+        continue-on-error: true
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DEPLOY_ALERT_FROM: ${{ secrets.DEPLOY_ALERT_FROM }}
+          AUTHOR_EMAIL: ${{ steps.meta.outputs.author_email }}
+          SUBJECT: ${{ steps.meta.outputs.subject }}
+          BODY: ${{ steps.meta.outputs.body }}
+        run: |
+          if [ -z "${RESEND_API_KEY}" ] || [ -z "${DEPLOY_ALERT_FROM}" ]; then
+            echo "Resend not configured; skipping email."
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          payload = {
+              "from": os.environ["DEPLOY_ALERT_FROM"],
+              "to": [os.environ["AUTHOR_EMAIL"]],
+              "subject": os.environ["SUBJECT"],
+              "text": os.environ["BODY"],
+          }
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(
+              "https://api.resend.com/emails",
+              data=data,
+              headers={
+                  "Authorization": f"Bearer {os.environ['RESEND_API_KEY']}",
+                  "Content-Type": "application/json",
+                  "User-Agent": "noma-deploy-notify/1.0 (github-actions)",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  print(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              body = exc.read().decode("utf-8", errors="replace")
+              print(f"Resend HTTP {exc.code}: {body}", file=sys.stderr)
+              raise
+          PY
+
+      - name: Notify team Slack channel
+        env:
+          SLACK_DEPLOY_TEAM_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_TEAM_WEBHOOK_URL }}
+          SLACK_TEXT: ${{ steps.meta.outputs.slack_text }}
+        run: |
+          if [ -z "${SLACK_DEPLOY_TEAM_WEBHOOK_URL}" ]; then
+            echo "Slack webhook not configured; skipping."
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          payload = {"text": os.environ["SLACK_TEXT"]}
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(
+              os.environ["SLACK_DEPLOY_TEAM_WEBHOOK_URL"],
+              data=data,
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "noma-deploy-notify/1.0 (github-actions)",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              print(f"Slack response: {resp.status}")
+          PY
