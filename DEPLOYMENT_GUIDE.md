@@ -117,6 +117,18 @@ System-wide Slack webhooks for Rextur API errors, booking confirmations, and the
 
 **CI deploy:** GitHub Actions writes `zappa_settings.json` from the **`ZAPPA_SETTINGS`** secret (`deploy-backend-reusable.yml`). After editing the local `zappa_settings*.json` files, sync the same keys into that secret before the next backend deploy so Lambda receives the webhook URLs.
 
+#### Rextur observability (Slack incoming webhooks)
+
+System-wide Slack webhooks for Rextur API errors, booking confirmations, and the daily active-travels monitor. Set in **`zappa_settings.json`** / **`zappa_settings_staging.json`** (`environment_variables` for `noma_prod` / `noma_staging`). Per-org `noma_config` fields still override these when present.
+
+| Variable | Channel | Required for |
+|----------|---------|--------------|
+| `SLACK_API_ERRORS_WEBHOOK_URL` | API errors | Rextur gateway failure alerts (timeout / non-2xx / transport error) |
+| `SLACK_BOOKINGS_WEBHOOK_URL` | Bookings | Flight booking confirmed (200 OK) — no-op when empty |
+| `SLACK_ACTIVE_TRAVELS_WEBHOOK_URL` | Active travels | Daily trips starting today/tomorrow — no-op when empty |
+
+**CI deploy:** GitHub Actions writes `zappa_settings.json` from the **`ZAPPA_SETTINGS`** secret (`deploy-backend-reusable.yml`). After editing the local `zappa_settings*.json` files, sync the same keys into that secret before the next backend deploy so Lambda receives the webhook URLs.
+
 CORS / allowed access in backend:
 
 - In Lambda, allowed origins are built from `FE_BASE_URL` + `APP_FE_BASE_URL`.
