@@ -164,6 +164,31 @@ jobs:
                   return data
               return json.loads(data.decode("utf-8"))
 
+          class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
+              # The Actions logs endpoint 302-redirects to blob storage, which rejects
+              # the GitHub Authorization header with 401. Drop it on redirect.
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  new = super().redirect_request(req, fp, code, msg, headers, newurl)
+                  if new is not None:
+                      new.remove_header("Authorization")
+                  return new
+
+          def gh_fetch_logs(url: str) -> str:
+              token = os.environ.get("GH_TOKEN")
+              if not token:
+                  return ""
+              opener = urllib.request.build_opener(_StripAuthOnRedirect())
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "noma-deploy-notify",
+                  },
+              )
+              with opener.open(req, timeout=25) as resp:
+                  return resp.read().decode("utf-8", errors="replace")
+
           # -------- Author email resolution (unchanged behaviour) --------
           if is_noreply(author_email) and author_login:
               mapping_raw = os.environ.get("USER_EMAIL_MAP", "").strip()
@@ -200,26 +225,49 @@ jobs:
           ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
           TS_RE = re.compile(r"^\S*\d{4}-\d{2}-\d{2}T[0-9:.]+Z\s?")
 
+          BOX_CHARS = set("\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c\u2500")
+
           def clean_line(line: str) -> str:
               line = ANSI_RE.sub("", line)
               line = TS_RE.sub("", line)
               return line.rstrip()
 
+          def is_boxy(line: str) -> bool:
+              return sum(c in BOX_CHARS for c in line) > 3
+
+          # Build-error signatures (compile/type/module errors), most useful first.
+          BUILD_SIGNALS = (
+              "failed to compile",
+              "type error:",
+              "error ts",
+              "module not found",
+              "cannot find module",
+              "syntaxerror",
+              "referenceerror",
+              "traceback (most recent call last)",
+          )
+
           def extract_error_lines(text: str, limit: int = 3):
-              errors, cypress, generic = [], [], []
+              cypress, build, gh_error, exit_code = [], [], [], []
               for raw in text.splitlines():
                   ln = clean_line(raw)
-                  if not ln:
+                  if not ln or is_boxy(ln):
                       continue
                   low = ln.lower()
-                  if "##[error]" in low:
-                      errors.append(ln.replace("##[error]", "").strip())
-                  elif ("\u2716" in ln) or ("failing" in low) or (" failed (" in low):
+                  if re.search(r"\d+ of \d+ failed", low) or re.search(r"\b[1-9]\d* failing\b", low):
                       cypress.append(ln.strip())
-                  elif low.startswith("error") or "exit code" in low or "typeerror" in ln or "traceback" in low:
-                      generic.append(ln.strip())
+                  elif any(sig in low for sig in BUILD_SIGNALS) or low.startswith("error "):
+                      build.append(ln.strip())
+                  elif "##[error]" in low:
+                      cleaned = ln.replace("##[error]", "").strip()
+                      # The bare "process completed" line is least informative; keep as fallback.
+                      if cleaned.lower().startswith("process completed with exit code"):
+                          exit_code.append(cleaned)
+                      else:
+                          gh_error.append(cleaned)
               ordered = []
-              for bucket in (errors, cypress, generic):
+              # Cypress + build errors first, then meaningful GH errors, then exit-code fallback.
+              for bucket in (cypress, build, gh_error, exit_code):
                   for item in bucket:
                       if item and item not in ordered:
                           ordered.append(item)
@@ -248,16 +296,9 @@ jobs:
                       failed_jobs.append(f"job {job_name} \u2192 step {step_label}")
                       if not error_lines and job.get("id"):
                           try:
-                              log_bytes = gh_api(
-                                  f"https://api.github.com/repos/{repo_for_jobs}/actions/jobs/{job['id']}/logs",
-                                  raw=True,
+                              text = gh_fetch_logs(
+                                  f"https://api.github.com/repos/{repo_for_jobs}/actions/jobs/{job['id']}/logs"
                               )
-                              text = ""
-                              if log_bytes:
-                                  try:
-                                      text = log_bytes.decode("utf-8", errors="replace")
-                                  except Exception:
-                                      text = ""
                               if text:
                                   error_lines = extract_error_lines(text)
                           except Exception as exc:
