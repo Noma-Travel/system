@@ -13,6 +13,17 @@ Use this sequence:
 3. Deploy backend (`zappa update` via `./zappa_update.sh`) with current production env.
 4. Run post-deploy org initialization (tools/actions, blueprint, config publish).
 
+### Lambda performance settings (latency)
+
+After changing `zappa_settings.json`, mirror the same values in the GitHub secret `ZAPPA_SETTINGS` used by CI deploy:
+
+- **`memory_size`**: `1024` (prod), `512` (staging) — higher memory grants more CPU per invocation.
+- **`events` / `keep_warm`**: `rate(4 minutes)` on `zappa.handler.keep_warm_callback` reduces cold starts between idle periods.
+
+### API Gateway response compression
+
+Enable **minimum compression size** (`1024` bytes) on the REST API stage in AWS Console (API Gateway → Stages → your stage → Settings). This reduces JSON payload transfer time for clients far from `us-east-1`. This is an AWS console change, not a code deploy.
+
 ---
 
 ## 2) Repositories included in backend deploy

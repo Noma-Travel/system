@@ -91,6 +91,19 @@ jobs:
           source venv/bin/activate
           pip install -r "${{ inputs.requirements_file }}"
 
+      - name: Checkout backend repo for prompt validation
+        uses: actions/checkout@v4
+        with:
+          repository: Noma-Travel/backend
+          ref: ${{ inputs.system_git_ref }}
+          path: backend-repo
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Validate agent system prompts
+        run: |
+          source venv/bin/activate
+          python backend-repo/scripts/validate_dedup_prompt.py
+
       - name: Write zappa_settings.json from secret
         run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
 
