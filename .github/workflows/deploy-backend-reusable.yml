@@ -84,7 +84,7 @@ jobs:
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
-          pip install zappa setuptools
+          pip install "zappa==0.59.0" setuptools
 
       - name: Install application dependencies
         run: |
@@ -185,9 +185,9 @@ jobs:
           chmod +x ./zappa_update.sh
           FN="noma-$(echo "$ZAPPA_STAGE" | tr '_' '-')"
           if aws lambda get-function --function-name "$FN" --region us-east-1 >/dev/null 2>&1; then
-            echo "Lambda $FN exists — running zappa update"
-            ./zappa_update.sh "$ZAPPA_STAGE" update
+            echo "Lambda $FN exists — running zappa update --clean"
+            ./zappa_update.sh "$ZAPPA_STAGE" update --clean
           else
-            echo "Lambda $FN not found — running zappa deploy (first-time)"
-            ./zappa_update.sh "$ZAPPA_STAGE" deploy
+            echo "Lambda $FN not found — running zappa deploy --clean (first-time)"
+            ./zappa_update.sh "$ZAPPA_STAGE" deploy --clean
           fi
