@@ -104,6 +104,10 @@ jobs:
           source venv/bin/activate
           python backend-repo/scripts/validate_dedup_prompt.py
 
+      - name: Remove backend checkout before packaging
+        if: always()
+        run: rm -rf backend-repo
+
       - name: Write zappa_settings.json from secret
         run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
 
