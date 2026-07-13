@@ -49,3 +49,9 @@ run.sh
 run.bat
 package-lock.json
 .gitmodules
+
+# Local scratch and backups
+_local_scratch/
+*.bak
+pyrightconfig.json
+run_local.ps1

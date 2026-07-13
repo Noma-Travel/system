@@ -553,6 +553,41 @@ echo "    Pip: $($DEPLOY_PYTHON -m pip --version)"
 echo "    Zappa: $("${ZAPPA_CLI[@]}" --version 2>/dev/null | tail -n 1)"
 echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr -d ' ')"
 
+# Step 11b: Preflight unzipped size estimate (Lambda hard limit 262144000 bytes)
+echo ""
+echo "==> Step 11b: Lambda package size preflight"
+export DEPLOY_SITE
+LAMBDA_UNZIPPED_LIMIT=262144000
+"$DEPLOY_PYTHON" - <<'PY'
+import os
+from pathlib import Path
+
+deploy_site = Path(os.environ["DEPLOY_SITE"])
+limit = int(os.environ.get("LAMBDA_UNZIPPED_LIMIT", "262144000"))
+headroom = 8_000_000
+budget = limit - headroom
+
+def dir_bytes(root: Path) -> int:
+    total = 0
+    if not root.is_dir():
+        return 0
+    for p in root.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total
+
+site_mb = dir_bytes(deploy_site) / (1024 * 1024)
+print(f"    Deploy site-packages on disk: {site_mb:.1f} MB (budget ~{budget / (1024 * 1024):.1f} MB)")
+if dir_bytes(deploy_site) > budget:
+    raise SystemExit(
+        "ERROR: deploy site-packages alone exceed Lambda unzipped budget; "
+        "trim deps, enable slim_handler, or use a Lambda layer."
+    )
+PY
+
 # Step 12: Temporarily move wheelhouse out of the way before Zappa packages
 echo ""
 echo "==> Step 12: Preparing for Zappa packaging"
