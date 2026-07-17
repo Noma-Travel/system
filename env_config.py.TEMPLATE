@@ -49,6 +49,14 @@ RESEND_API_KEY=''
 INVITE_FROM='Noma <noreply@example.com>'
 SES_INVITE_SENDER='noreply@example.com'
 
+# Flight-change negotiation agent (flight_change_react / flight_change_inbound)
+FLIGHT_CHANGE_PROVIDER_EMAIL=''      # default desk address when kickoff omits provider.contact_email
+FLIGHT_CHANGE_EMAIL_OBSERVER=''      # silent BCC on every negotiation email (comma-separated)
+FLIGHT_CHANGE_EMAIL_FROM=''          # From header; defaults to _provider_email.FROM_ADDRESS
+FLIGHT_CHANGE_INBOUND_DOMAIN=''      # Resend Inbound (MX) domain for reply+ addresses
+FLIGHT_CHANGE_EMAIL_DRY_RUN=''       # '1' logs instead of calling Resend
+RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webhook (optional)
+
 #---------
 
 #WEB SOCKET
