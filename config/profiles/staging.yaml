@@ -9,6 +9,9 @@ API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:2r4dlx8qdj
 SYS_ENV: noma_staging
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
+NOMA_APPROVAL_ENFORCEMENT: "on"
+SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com
+SYSTEM_ADMIN_USER_IDS: 5bd438a5e
 NOMA_E2E_SEED_ALLOWED: "1"
 DYNAMODB_ENTITY_TABLE: noma-staging_entities
 DYNAMODB_BLUEPRINT_TABLE: noma-staging_blueprints
