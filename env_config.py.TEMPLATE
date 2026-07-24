@@ -53,7 +53,10 @@ SES_INVITE_SENDER='noreply@example.com'
 FLIGHT_CHANGE_PROVIDER_EMAIL=''      # default desk address when kickoff omits provider.contact_email
 FLIGHT_CHANGE_EMAIL_OBSERVER=''      # silent BCC on every negotiation email (comma-separated)
 FLIGHT_CHANGE_EMAIL_FROM=''          # From header; defaults to _provider_email.FROM_ADDRESS
-FLIGHT_CHANGE_INBOUND_DOMAIN=''      # Resend Inbound (MX) domain for reply+ addresses
+FLIGHT_CHANGE_INBOUND_DOMAIN=''      # Resend Inbound domain for reply+ addresses. Prod: your MX-verified
+                                     # domain (e.g. email.travelwithnoma.com). For testing with no DNS, use the
+                                     # auto-provisioned Resend receiving subdomain (Dashboard → Emails → Receiving),
+                                     # e.g. <id>.resend.app — accepts any local part incl. the reply+ token.
 FLIGHT_CHANGE_EMAIL_DRY_RUN=''       # '1' logs instead of calling Resend
 RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webhook (optional)
 
