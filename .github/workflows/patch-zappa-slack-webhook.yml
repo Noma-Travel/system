@@ -1,0 +1,84 @@
+name: Patch Zappa Slack Rextur Webhook
+
+# One-shot: update SLACK_WEBHOOK_REXTUR_ALERTS (and legacy Slack booking/error
+# webhooks) inside ZAPPA_SETTINGS / ZAPPA_SETTINGS_STAGING so the next deploy
+# does not overwrite Lambda env with the old channel URL.
+on:
+  workflow_dispatch:
+    inputs:
+      new_webhook_url:
+        description: New Slack incoming webhook URL for #alteracoes / Rextur alerts
+        required: true
+        type: string
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Patch GitHub Zappa secrets
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_REPO: ${{ github.repository }}
+          ZAPPA_SETTINGS: ${{ secrets.ZAPPA_SETTINGS }}
+          ZAPPA_SETTINGS_STAGING: ${{ secrets.ZAPPA_SETTINGS_STAGING }}
+          NEW_WEBHOOK: ${{ inputs.new_webhook_url }}
+        run: |
+          python <<'PY'
+          import json, os, subprocess
+
+          NEW = os.environ["NEW_WEBHOOK"].strip()
+          if "hooks.slack.com" not in NEW:
+              raise SystemExit("new_webhook_url does not look like a Slack webhook")
+          KEYS = (
+              "SLACK_WEBHOOK_REXTUR_ALERTS",
+              "SLACK_API_ERRORS_WEBHOOK_URL",
+              "SLACK_BOOKINGS_WEBHOOK_URL",
+              "SLACK_ACTIVE_TRAVELS_WEBHOOK_URL",
+          )
+          KEEP = "SLACK_WEBHOOK_DEFERRED_BOOKING"
+
+          def patch(raw: str, label: str) -> dict:
+              if not raw or not raw.strip():
+                  raise SystemExit(f"{label} secret is empty")
+              data = json.loads(raw)
+              if not isinstance(data, dict):
+                  raise SystemExit(f"{label} is not a JSON object")
+              touched = []
+              for stage_name, stage in data.items():
+                  if not isinstance(stage, dict):
+                      continue
+                  env = stage.get("environment_variables")
+                  if not isinstance(env, dict):
+                      continue
+                  before = {k: env.get(k) for k in KEYS}
+                  for k in KEYS:
+                      env[k] = NEW
+                  after_deferred = env.get(KEEP)
+                  print(f"{label} stage={stage_name!r}")
+                  for k in KEYS:
+                      b = before.get(k) or ""
+                      print(f"  {k}: ...{(b[-12:] if b else '(missing)')} -> ...{NEW[-12:]}")
+                  if after_deferred:
+                      print(f"  {KEEP}: unchanged ...{after_deferred[-12:]}")
+                  touched.append(stage_name)
+              if not touched:
+                  raise SystemExit(f"{label}: no stage with environment_variables found")
+              return data
+
+          def set_secret(name: str, payload: dict) -> None:
+              body = json.dumps(payload, ensure_ascii=False)
+              subprocess.run(
+                  ["gh", "secret", "set", name, "--repo", os.environ["GH_REPO"]],
+                  input=body,
+                  text=True,
+                  check=True,
+              )
+
+          prod = patch(os.environ["ZAPPA_SETTINGS"], "ZAPPA_SETTINGS")
+          staging = patch(os.environ["ZAPPA_SETTINGS_STAGING"], "ZAPPA_SETTINGS_STAGING")
+          set_secret("ZAPPA_SETTINGS", prod)
+          set_secret("ZAPPA_SETTINGS_STAGING", staging)
+          print("Patched ZAPPA_SETTINGS and ZAPPA_SETTINGS_STAGING successfully.")
+          PY
