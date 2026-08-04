@@ -116,25 +116,50 @@ def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
     _bootstrap_renglo()
     from renglo.auth.auth_controller import AuthController
 
+    # Prefer explicit env overrides (so staging/prod runs don't pick up a local env_config).
+    entity_table = os.environ.get("DYNAMODB_ENTITY_TABLE") or ENTITY_TABLE
+    rel_table = os.environ.get("DYNAMODB_REL_TABLE") or ""
+    region = os.environ.get("COGNITO_REGION") or REGION
+    pool = os.environ.get("COGNITO_USERPOOL_ID") or COGNITO_POOL
     try:
         import env_config as ec
 
-        config = {
-            "DYNAMODB_ENTITY_TABLE": getattr(ec, "DYNAMODB_ENTITY_TABLE", ENTITY_TABLE),
-            "DYNAMODB_REL_TABLE": getattr(ec, "DYNAMODB_REL_TABLE", ""),
-            "COGNITO_REGION": getattr(ec, "COGNITO_REGION", REGION),
-            "COGNITO_USERPOOL_ID": getattr(ec, "COGNITO_USERPOOL_ID", COGNITO_POOL),
-        }
+        entity_table = os.environ.get("DYNAMODB_ENTITY_TABLE") or getattr(
+            ec, "DYNAMODB_ENTITY_TABLE", entity_table
+        )
+        rel_table = os.environ.get("DYNAMODB_REL_TABLE") or getattr(
+            ec, "DYNAMODB_REL_TABLE", rel_table
+        )
+        region = os.environ.get("COGNITO_REGION") or getattr(ec, "COGNITO_REGION", region)
+        pool = os.environ.get("COGNITO_USERPOOL_ID") or getattr(
+            ec, "COGNITO_USERPOOL_ID", pool
+        )
     except ImportError:
-        config = {
-            "DYNAMODB_ENTITY_TABLE": ENTITY_TABLE,
-            "COGNITO_REGION": REGION,
-            "COGNITO_USERPOOL_ID": COGNITO_POOL,
-        }
+        pass
+
+    config = {
+        "DYNAMODB_ENTITY_TABLE": entity_table,
+        "DYNAMODB_REL_TABLE": rel_table,
+        "COGNITO_REGION": region,
+        "COGNITO_USERPOOL_ID": pool,
+    }
+    print(f"DynamoDB: using table {entity_table}")
     auc = AuthController(config=config)
     existing = auc.get_entity("user", user_id=user_id)
     if existing.get("success"):
-        print(f"DynamoDB: user entity already exists (_id={user_id})")
+        doc = existing.get("document") or {}
+        if doc.get("slot_d") != "global_admin":
+            updated = auc.update_entity(
+                "user",
+                user_id=user_id,
+                payload={"slot_d": "global_admin", "email": email or doc.get("email") or ""},
+            )
+            if updated.get("success"):
+                print(f"DynamoDB: set slot_d=global_admin on user (_id={user_id})")
+            else:
+                print(f"WARNING: could not set slot_d on user {user_id}: {updated}", file=sys.stderr)
+        else:
+            print(f"DynamoDB: user entity already global_admin (_id={user_id})")
         return
 
     result = auc.create_user_funnel(
@@ -142,10 +167,11 @@ def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
         email=email,
         name=first,
         slot_a=last,
+        slot_d="global_admin",
     )
     if not result.get("success"):
         raise RuntimeError(f"create_user_funnel failed: {result}")
-    print(f"DynamoDB: created user entity (_id={user_id})")
+    print(f"DynamoDB: created user entity as global_admin (_id={user_id})")
 
 
 def main() -> int:

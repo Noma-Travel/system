@@ -10,8 +10,8 @@ SYS_ENV: noma_staging
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
 NOMA_APPROVAL_ENFORCEMENT: "on"
-SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com
-SYSTEM_ADMIN_USER_IDS: 5bd438a5e
+SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com,jpcastroneves@travelwithnoma.com
+SYSTEM_ADMIN_USER_IDS: 5bd438a5e,18f25b74f
 NOMA_E2E_SEED_ALLOWED: "1"
 DYNAMODB_ENTITY_TABLE: noma-staging_entities
 DYNAMODB_BLUEPRINT_TABLE: noma-staging_blueprints
@@ -28,6 +28,7 @@ WEBSOCKET_CONNECTIONS: https://1qefn6vt95.execute-api.us-east-1.amazonaws.com/pr
 ALLOW_DEV_ORIGINS: "true"
 INVITE_FROM: Noma <noreply@email.travelwithnoma.com>
 SES_INVITE_SENDER: noreply@email.travelwithnoma.com
+OPS_LINK_BASE_URL: https://staging.travelwithnoma.com
 VITE_EXTENSIONS: schd,data,backend
 VITE_WL_LOGO: /small_logo.jpg
 VITE_WL_LOGIN: /large_logo.jpg
