@@ -1,0 +1,80 @@
+name: Patch Zappa MS Redirect URI
+
+# One-shot: fix NEXT_PUBLIC_MS_REDIRECT_URI (and drop dead app.travelwithnoma.com
+# from CORS) inside ZAPPA_SETTINGS so the next backend deploy does not overwrite
+# the Lambda env fix with the old NXDOMAIN redirect.
+on:
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Patch GitHub Zappa prod secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_REPO: ${{ github.repository }}
+          ZAPPA_SETTINGS: ${{ secrets.ZAPPA_SETTINGS }}
+        run: |
+          python <<'PY'
+          import json, os, subprocess
+
+          OLD_HOST = "app.travelwithnoma.com"
+          NEW_REDIRECT = "https://travelwithnoma.com/dashboard/settings/calendar/callback"
+          KEY = "NEXT_PUBLIC_MS_REDIRECT_URI"
+          CORS_KEY = "CORS_ALLOWED_ORIGINS"
+
+          def patch_cors(raw: str) -> str:
+              parts = [p.strip() for p in (raw or "").split(",") if p.strip()]
+              parts = [p for p in parts if OLD_HOST not in p]
+              for required in (
+                  "https://www.travelwithnoma.com",
+                  "https://travelwithnoma.com",
+              ):
+                  if required not in parts:
+                      parts.append(required)
+              return ",".join(parts)
+
+          raw = os.environ.get("ZAPPA_SETTINGS") or ""
+          if not raw.strip():
+              raise SystemExit("ZAPPA_SETTINGS secret is empty")
+          data = json.loads(raw)
+          if not isinstance(data, dict):
+              raise SystemExit("ZAPPA_SETTINGS is not a JSON object")
+
+          touched = []
+          for stage_name, stage in data.items():
+              if not isinstance(stage, dict):
+                  continue
+              env = stage.get("environment_variables")
+              if not isinstance(env, dict):
+                  continue
+              before = env.get(KEY) or ""
+              before_cors = env.get(CORS_KEY) or ""
+              env[KEY] = NEW_REDIRECT
+              if CORS_KEY in env or OLD_HOST in before_cors:
+                  env[CORS_KEY] = patch_cors(before_cors)
+              print(f"stage={stage_name!r}")
+              print(f"  {KEY}:")
+              print(f"    before: {before}")
+              print(f"    after:  {env[KEY]}")
+              if CORS_KEY in env:
+                  print(f"  {CORS_KEY}:")
+                  print(f"    before: {before_cors}")
+                  print(f"    after:  {env[CORS_KEY]}")
+              touched.append(stage_name)
+
+          if not touched:
+              raise SystemExit("ZAPPA_SETTINGS: no stage with environment_variables found")
+
+          body = json.dumps(data, ensure_ascii=False)
+          subprocess.run(
+              ["gh", "secret", "set", "ZAPPA_SETTINGS", "--repo", os.environ["GH_REPO"]],
+              input=body,
+              text=True,
+              check=True,
+          )
+          print("Patched ZAPPA_SETTINGS successfully. Staging left unchanged (already correct).")
+          PY
