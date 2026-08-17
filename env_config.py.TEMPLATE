@@ -71,6 +71,15 @@ FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER=''        # hours before a case the desk
                                      # answered is parked as 'stalled' (default 24).
 FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER_REISSUE=''  # same, after we've already paid
                                      # (default 72 — longer rope before nagging).
+FLIGHT_CHANGE_MODEL=''               # model for the email-comprehension decider
+                                     # (default gpt-4o). One call per inbound mail;
+                                     # cost is negligible next to a booking, so
+                                     # prefer capability over price here.
+FLIGHT_CHANGE_NOTIFY_REDIRECT=''     # comma-separated: divert ALL user-facing
+                                     # flight-change email here (testing aid, off
+                                     # unless set).
+FLIGHT_CHANGE_NOTIFY_USER_EMAIL=''   # '0'/'false'/'no' silences the user emails
+                                     # (ON by default).
 
 #---------
 
