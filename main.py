@@ -167,11 +167,14 @@ def main():
     
     logger.info(f"Starting server on port {port}...")
     # Keep local runs deterministic by default; enable reloader only when explicitly requested.
+    # use_reloader=False avoids orphan parent/child servers fighting for port 5001 on Windows.
     debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
+    use_reloader = os.getenv('FLASK_RELOADER', '0') == '1'
     app.run(
         host='0.0.0.0',
         port=port,
-        debug=debug_mode
+        debug=debug_mode,
+        use_reloader=use_reloader,
     )
 
 

@@ -10,11 +10,12 @@ from noma_env.paths import NOMA_PACKAGE_DIR, RENGLO_API_DIR, RENGLO_LIB_DIR, SYS
 
 
 def build_backend_env(
-    aws_profile: str = "noma",
+    aws_profile: str | None = None,
     aws_region: str = "us-east-1",
 ) -> dict[str, str]:
     env = os.environ.copy()
-    env["AWS_PROFILE"] = aws_profile
+    # Prefer the caller's AWS_PROFILE (e.g. joao-noma) over a hardcoded default.
+    env["AWS_PROFILE"] = aws_profile or os.environ.get("AWS_PROFILE") or "noma"
     env["AWS_DEFAULT_REGION"] = aws_region
 
     parts: list[str] = []

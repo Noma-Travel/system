@@ -42,7 +42,8 @@ S3_BUCKET_NAME = ''
 #---------
 
 #OPEN AI
-OPENAI_API_KEY=''
+
+_API_KEY=''
 
 # Invite / transactional email (Resend)
 RESEND_API_KEY=''
