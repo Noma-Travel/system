@@ -67,6 +67,10 @@ RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webho
 FLIGHT_CHANGE_ALLOW_UNSIGNED_WEBHOOK=''  # '1' to accept unsigned inbound mail on a deployed env.
                                      # Bootstrap only: Resend issues the signing secret after the
                                      # endpoint is registered. Clear it as soon as the secret is set.
+FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER=''        # hours before a case the desk never
+                                     # answered is parked as 'stalled' (default 24).
+FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER_REISSUE=''  # same, after we've already paid
+                                     # (default 72 — longer rope before nagging).
 
 #---------
 
