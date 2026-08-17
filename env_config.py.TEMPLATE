@@ -59,7 +59,14 @@ FLIGHT_CHANGE_INBOUND_DOMAIN=''      # Resend Inbound domain for reply+ addresse
                                      # auto-provisioned Resend receiving subdomain (Dashboard → Emails → Receiving),
                                      # e.g. <id>.resend.app — accepts any local part incl. the reply+ token.
 FLIGHT_CHANGE_EMAIL_DRY_RUN=''       # '1' logs instead of calling Resend
-RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webhook (optional)
+RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webhook. REQUIRED on a
+                                     # deployed env: the inbound route is public and unauthenticated,
+                                     # so this signature is the only thing separating a real desk
+                                     # reply from a forged quote + payment link. Unset in Lambda =>
+                                     # inbound webhooks are REJECTED (see flight_change_inbound).
+FLIGHT_CHANGE_ALLOW_UNSIGNED_WEBHOOK=''  # '1' to accept unsigned inbound mail on a deployed env.
+                                     # Bootstrap only: Resend issues the signing secret after the
+                                     # endpoint is registered. Clear it as soon as the secret is set.
 
 #---------
 
