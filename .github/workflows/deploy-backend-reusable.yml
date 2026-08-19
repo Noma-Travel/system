@@ -135,24 +135,23 @@ jobs:
 
           env = stage.get("environment_variables") or {}
 
-          required = (
-              "FE_BASE_URL",
-              "APP_FE_BASE_URL",
-              "CORS_ALLOWED_ORIGINS",
-              # Rings the generic /_data CRUD must refuse because a /v1 resource
-              # owns them. Required, not optional: the rules that protected these
-              # rings (payment authz, card redaction, trip approval stripping)
-              # were deleted from data_routes.py when the resources took them
-              # over. Deploying without this value serves them with no rules.
-              "DATA_API_RING_POLICY",
-          )
+          required = ("FE_BASE_URL", "APP_FE_BASE_URL", "CORS_ALLOWED_ORIGINS")
           missing = [k for k in required if not str(env.get(k, "")).strip()]
           if missing:
               print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
               sys.exit(1)
 
-          # A typo'd mode is ignored at runtime (fail-open, so a typo cannot take
-          # the data API down). That makes it invisible, so catch it here instead.
+          # DATA_API_RING_POLICY is optional here, and deliberately so.
+          #
+          # It was required for one day. That was wrong twice over: the rings a
+          # /v1 resource owns are closed by noma.api.register() regardless of
+          # config, so the requirement was redundant; and it only ran on a push to
+          # this repo, not on the repository_dispatch that a code repo fires — so
+          # it blocked the safe path while the unguarded one deployed anyway.
+          #
+          # What is still worth checking is the shape, for rings added here on top
+          # of the declared ones: a typo'd mode is ignored at runtime (fail-open,
+          # so a typo cannot take the data API down) and would be invisible.
           bad_policy = []
           for entry in str(env.get("DATA_API_RING_POLICY", "")).split(","):
               if not entry.strip():
