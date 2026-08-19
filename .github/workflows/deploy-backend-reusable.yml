@@ -135,10 +135,36 @@ jobs:
 
           env = stage.get("environment_variables") or {}
 
-          required = ("FE_BASE_URL", "APP_FE_BASE_URL", "CORS_ALLOWED_ORIGINS")
+          required = (
+              "FE_BASE_URL",
+              "APP_FE_BASE_URL",
+              "CORS_ALLOWED_ORIGINS",
+              # Rings the generic /_data CRUD must refuse because a /v1 resource
+              # owns them. Required, not optional: the rules that protected these
+              # rings (payment authz, card redaction, trip approval stripping)
+              # were deleted from data_routes.py when the resources took them
+              # over. Deploying without this value serves them with no rules.
+              "DATA_API_RING_POLICY",
+          )
           missing = [k for k in required if not str(env.get(k, "")).strip()]
           if missing:
               print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
+              sys.exit(1)
+
+          # A typo'd mode is ignored at runtime (fail-open, so a typo cannot take
+          # the data API down). That makes it invisible, so catch it here instead.
+          bad_policy = []
+          for entry in str(env.get("DATA_API_RING_POLICY", "")).split(","):
+              if not entry.strip():
+                  continue
+              ring, sep, mode = entry.partition(":")
+              if not sep or not ring.strip() or mode.strip().lower() not in ("deny", "deny_write"):
+                  bad_policy.append(entry.strip())
+          if bad_policy:
+              print(
+                  "ERROR: DATA_API_RING_POLICY entries must be '<ring>:deny' or "
+                  f"'<ring>:deny_write'. Bad: {', '.join(bad_policy)}"
+              )
               sys.exit(1)
 
           def normalize_origin(value: str) -> str:

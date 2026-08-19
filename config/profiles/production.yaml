@@ -9,6 +9,10 @@ API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:u8za3vvgbb
 SYS_ENV: noma_prod
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
+# Rings owned by the /v1 product API; the generic /_data CRUD refuses them.
+# payment methods are deny (not deny_write) because redaction protected the READ
+# and the generic route no longer redacts — an open read hands out card data.
+DATA_API_RING_POLICY: noma_payment_methods:deny,noma_travels:deny_write,noma_trip_payments:deny_write,noma_trip_ops_bookings:deny_write,noma_trip_calendar:deny_write
 SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com,jpcastroneves@travelwithnoma.com
 SYSTEM_ADMIN_USER_IDS: 1da76fab8,e9f8f41ac
 DYNAMODB_ENTITY_TABLE: noma-prod_entities
