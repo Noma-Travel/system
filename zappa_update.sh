@@ -41,9 +41,22 @@ DEPLOY_VENV="${SCRIPT_DIR}/.venv_deploy"
 # Default: build for AWS Lambda (Linux x86_64, CPython 3.12). Required when running this script on
 # Windows/macOS so pip downloads and installs manylinux wheels; set ZAPPA_LAMBDA_WHEEL_PLATFORM=0
 # to use host wheels (broken on Lambda for native modules like pydantic_core).
+# Two platform tags: pip accepts --platform more than once and takes a wheel that
+# matches ANY of them. manylinux2014 is glibc 2.17; projects have started dropping
+# it for manylinux_2_28 (Pillow did at 12.3.0, published 2026-07-01). With only the
+# old tag, nothing matches, pip quietly falls back to the sdist, and the offline
+# install later fails trying to build it — Pillow's PEP 517 build needs pybind11,
+# which was never downloaded into the wheelhouse.
+#
+# Safe on Lambda: the python3.12 runtime is Amazon Linux 2023 (glibc 2.34), well
+# above the 2.28 these wheels require.
 LAMBDA_PIP_PLATFORM_FLAGS=()
 if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]]; then
-  LAMBDA_PIP_PLATFORM_FLAGS=(--platform manylinux2014_x86_64 --implementation cp --python-version 312 --abi cp312)
+  LAMBDA_PIP_PLATFORM_FLAGS=(
+    --platform manylinux_2_28_x86_64
+    --platform manylinux2014_x86_64
+    --implementation cp --python-version 312 --abi cp312
+  )
 fi
 
 # Track original environment
