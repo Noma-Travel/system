@@ -581,6 +581,58 @@ echo "    Pip: $($DEPLOY_PYTHON -m pip --version)"
 echo "    Zappa: $("${ZAPPA_CLI[@]}" --version 2>/dev/null | tail -n 1)"
 echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr -d ' ')"
 
+# Step 11a: Tell Zappa not to package the AWS SDK.
+#
+# The Lambda python3.12 runtime already provides boto3/botocore/s3transfer, and
+# botocore alone is ~90 MB unzipped (service-model JSON) — the difference
+# between fitting in the 250 MB limit and being rejected at upload.
+#
+# This has to be Zappa's `exclude` rather than deleting the files: DEPLOY_SITE is
+# .venv_deploy's site-packages, which is where Zappa itself runs from, and Zappa
+# imports botocore. Removing them would break the deploy tool before it packages
+# anything. `exclude` keeps them installed and leaves them out of the zip.
+#
+# Filtering .freeze.txt alone is also not enough: Step 8d installs the git
+# packages without --no-deps, and renglo-lib declares boto3==1.35.38, so pip puts
+# them back. This is applied to the settings file, so it holds no matter which
+# step reintroduced them.
+echo ""
+echo "==> Step 11a: Excluding AWS SDK from the Lambda zip (runtime provides it)"
+ZAPPA_SETTINGS_FILE="${SCRIPT_DIR}/zappa_settings.json"
+if [[ -f "$ZAPPA_SETTINGS_FILE" ]]; then
+  ZAPPA_SETTINGS_FILE="$ZAPPA_SETTINGS_FILE" STAGE="$STAGE" "$DEPLOY_PYTHON" - <<'PY'
+import json, os
+
+path = os.environ["ZAPPA_SETTINGS_FILE"]
+stage = os.environ["STAGE"]
+
+# Zappa copies site-packages with shutil.ignore_patterns(*(ZIP_EXCLUDES + exclude)),
+# which fnmatches base names — so the trailing * is what also drops the
+# matching *.dist-info directories (zappa/core.py, create_lambda_zip).
+patterns = ["boto3*", "botocore*", "s3transfer*"]
+
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+cfg = data.setdefault(stage, {})
+existing = list(cfg.get("exclude") or [])
+cfg["exclude"] = existing + [p for p in patterns if p not in existing]
+
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+
+print(f"    exclude for {stage}: {cfg['exclude']}")
+
+# exclude is only honoured on the minify path, which is Zappa's default. If it
+# was turned off explicitly, this whole step is a no-op and the zip stays large.
+if cfg.get("minify") is False:
+    print("    WARNING: minify is false for this stage — Zappa ignores `exclude`,")
+    print("             so boto3/botocore will still be packaged.")
+PY
+else
+  echo "    (skip) $(basename "$ZAPPA_SETTINGS_FILE") not found"
+fi
+
 # Step 11b: Preflight unzipped size estimate (Lambda hard limit 262144000 bytes)
 echo ""
 echo "==> Step 11b: Lambda package size preflight"
@@ -611,9 +663,22 @@ def dir_bytes(root: Path) -> int:
                 pass
     return total
 
-site_bytes = dir_bytes(deploy_site)
+# Zappa leaves these out of the zip (Step 11a), so counting them here would
+# report a package that is ~90 MB heavier than the one actually uploaded.
+EXCLUDED_PREFIXES = ("boto3", "botocore", "s3transfer")
+
+excluded_bytes = sum(
+    dir_bytes(child)
+    for child in deploy_site.iterdir()
+    if child.is_dir() and child.name.startswith(EXCLUDED_PREFIXES)
+)
+site_bytes = dir_bytes(deploy_site) - excluded_bytes
 site_mb = site_bytes / (1024 * 1024)
-print(f"    Deploy site-packages on disk: {site_mb:.1f} MB (budget ~{budget / (1024 * 1024):.1f} MB)")
+print(
+    f"    Deploy site-packages on disk: {site_mb:.1f} MB "
+    f"(budget ~{budget / (1024 * 1024):.1f} MB; "
+    f"{excluded_bytes / (1024 * 1024):.1f} MB excluded from the zip)"
+)
 
 # Always print the breakdown, not only on failure. AWS rejects the upload with
 # "Unzipped size must be smaller than 262144000 bytes" and nothing about what is
@@ -624,7 +689,8 @@ tops = sorted(
 )[:15]
 print("    Largest packages:")
 for size, name in tops:
-    print(f"      {size / (1024 * 1024):8.1f} MB  {name}")
+    tag = "  (excluded from zip)" if name.startswith(EXCLUDED_PREFIXES) else ""
+    print(f"      {size / (1024 * 1024):8.1f} MB  {name}{tag}")
 
 if site_bytes > budget:
     raise SystemExit(
