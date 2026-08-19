@@ -211,12 +211,27 @@ echo "==> Step 2: Capturing current environment (exact versions)"
 pip freeze --exclude-editable > "$FREEZE_FILE.tmp"
 
 # Clean up any malformed lines (git references, local paths, etc.)
+#
+# boto3/botocore/s3transfer are dropped on purpose: the AWS Lambda python3.12
+# runtime already ships them, and botocore is the single largest thing in the
+# bundle (~90 MB unzipped, almost entirely service-model JSON). Shipping our own
+# copy spends most of the 250 MB unzipped limit on code AWS already put there.
+# Excluding them here — rather than in Zappa's `exclude` — also keeps them out
+# of the wheelhouse download, so deploys get faster too.
+#
+# The trade-off is version drift: renglo-lib pins boto3==1.35.38 and the runtime
+# provides its own. The APIs used here (DynamoDB, S3, Cognito, Secrets Manager)
+# are long-stable, so this is low risk — but if a deploy ever fails on a missing
+# boto3 attribute, this is the line that explains why.
 grep -v "^-e " "$FREEZE_FILE.tmp" | \
 grep -v "\.git@" | \
 grep -v "^file://" | \
 grep -v "^noma-mod==" | \
 grep -v "^renglo-api==" | \
 grep -v "^renglo-lib==" | \
+grep -vi "^boto3==" | \
+grep -vi "^botocore==" | \
+grep -vi "^s3transfer==" | \
 grep -E "^[a-zA-Z0-9_-]+" > "$FREEZE_FILE" || touch "$FREEZE_FILE"
 
 rm -f "$FREEZE_FILE.tmp"
@@ -577,7 +592,11 @@ from pathlib import Path
 
 deploy_site = Path(os.environ["DEPLOY_SITE"])
 limit = int(os.environ.get("LAMBDA_UNZIPPED_LIMIT", "262144000"))
-headroom = 8_000_000
+# site-packages is not the whole zip: the project root, Zappa's handler and the
+# temporarily vendored werkzeug/ ride along too. 8 MB of headroom was not enough
+# — a build passed this check and was still rejected by AWS with "Unzipped size
+# must be smaller than 262144000 bytes", so the gap is larger than that.
+headroom = 30_000_000
 budget = limit - headroom
 
 def dir_bytes(root: Path) -> int:
@@ -592,9 +611,22 @@ def dir_bytes(root: Path) -> int:
                 pass
     return total
 
-site_mb = dir_bytes(deploy_site) / (1024 * 1024)
+site_bytes = dir_bytes(deploy_site)
+site_mb = site_bytes / (1024 * 1024)
 print(f"    Deploy site-packages on disk: {site_mb:.1f} MB (budget ~{budget / (1024 * 1024):.1f} MB)")
-if dir_bytes(deploy_site) > budget:
+
+# Always print the breakdown, not only on failure. AWS rejects the upload with
+# "Unzipped size must be smaller than 262144000 bytes" and nothing about what is
+# big, so the answer has to be in the build log before the upload is attempted.
+tops = sorted(
+    ((dir_bytes(child), child.name) for child in deploy_site.iterdir() if child.is_dir()),
+    reverse=True,
+)[:15]
+print("    Largest packages:")
+for size, name in tops:
+    print(f"      {size / (1024 * 1024):8.1f} MB  {name}")
+
+if site_bytes > budget:
     raise SystemExit(
         "ERROR: deploy site-packages alone exceed Lambda unzipped budget; "
         "trim deps, enable slim_handler, or use a Lambda layer."
