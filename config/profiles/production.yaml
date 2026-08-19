@@ -9,6 +9,9 @@ API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:u8za3vvgbb
 SYS_ENV: noma_prod
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
+# Keep handler modules loaded between invocations on a warm container.
+# "on" restores the previous re-import-every-call behaviour (rollback lever).
+SCHD_UNLOAD_HANDLERS: "off"
 SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com,jpcastroneves@travelwithnoma.com
 SYSTEM_ADMIN_USER_IDS: 1da76fab8,e9f8f41ac
 DYNAMODB_ENTITY_TABLE: noma-prod_entities
