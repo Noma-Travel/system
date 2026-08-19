@@ -599,6 +599,9 @@ echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr
 echo ""
 echo "==> Step 11a: Excluding AWS SDK from the Lambda zip (runtime provides it)"
 ZAPPA_SETTINGS_FILE="${SCRIPT_DIR}/zappa_settings.json"
+EXCLUDE_NAMES_FILE="${SCRIPT_DIR}/.zappa_exclude_names.txt"
+export EXCLUDE_NAMES_FILE
+rm -f "$EXCLUDE_NAMES_FILE"
 if [[ -f "$ZAPPA_SETTINGS_FILE" ]]; then
   ZAPPA_SETTINGS_FILE="$ZAPPA_SETTINGS_FILE" STAGE="$STAGE" "$DEPLOY_PYTHON" - <<'PY'
 import json, os
@@ -606,9 +609,21 @@ import json, os
 path = os.environ["ZAPPA_SETTINGS_FILE"]
 stage = os.environ["STAGE"]
 
-# Zappa copies site-packages with shutil.ignore_patterns(*(ZIP_EXCLUDES + exclude)),
-# which fnmatches base names — so the trailing * is what also drops the
-# matching *.dist-info directories (zappa/core.py, create_lambda_zip).
+# Zappa copies both the project and site-packages with
+# shutil.ignore_patterns(*(ZIP_EXCLUDES + exclude)) (zappa/core.py,
+# create_lambda_zip). ignore_patterns fnmatches BASE NAMES, never paths, so any
+# pattern containing a slash silently matches nothing:
+#
+#     venv/*  .venv_deploy/*  .wheelhouse/*  backend-repo/*  __pycache__/*
+#     tests/*  .git/*  .pytest_cache/*  **/handlers/tests/*
+#
+# every one of those is a no-op. That is how the build venv ended up inside the
+# zip: site-packages measured 182 MB, under budget, and AWS still rejected the
+# upload because venv/ rode along on top of it.
+#
+# Rewriting them to their base name is what makes them do what they were
+# written to do. The original patterns are kept — harmless, and it keeps the
+# diff against the secret readable.
 patterns = ["boto3*", "botocore*", "s3transfer*"]
 
 with open(path, "r", encoding="utf-8") as fh:
@@ -616,12 +631,34 @@ with open(path, "r", encoding="utf-8") as fh:
 
 cfg = data.setdefault(stage, {})
 existing = list(cfg.get("exclude") or [])
-cfg["exclude"] = existing + [p for p in patterns if p not in existing]
+
+def base_name(pattern):
+    """'venv/*' -> 'venv';  '**/handlers/tests/*' -> 'tests';  '*.pyc' -> None."""
+    if "/" not in pattern:
+        return None
+    parts = [p for p in pattern.split("/") if p not in ("**", "*", "")]
+    return parts[-1] if parts else None
+
+repaired = []
+for pattern in existing:
+    name = base_name(pattern)
+    if name and name not in existing and name not in repaired:
+        repaired.append(name)
+
+added = repaired + [p for p in patterns if p not in existing and p not in repaired]
+cfg["exclude"] = existing + added
 
 with open(path, "w", encoding="utf-8") as fh:
     json.dump(data, fh, indent=2)
 
+if repaired:
+    print(f"    repaired path-style patterns (ignore_patterns matches base names only): {repaired}")
 print(f"    exclude for {stage}: {cfg['exclude']}")
+
+# Hand the base-name exclusions to the size preflight so it can measure the
+# project root the way Zappa will actually copy it.
+with open(os.environ["EXCLUDE_NAMES_FILE"], "w", encoding="utf-8") as fh:
+    fh.write("\n".join(p for p in cfg["exclude"] if "/" not in p and "*" not in p))
 
 # exclude is only honoured on the minify path, which is Zappa's default. If it
 # was turned off explicitly, this whole step is a no-op and the zip stays large.
@@ -637,7 +674,10 @@ fi
 echo ""
 echo "==> Step 11b: Lambda package size preflight"
 export DEPLOY_SITE
+PROJECT_ROOT="$SCRIPT_DIR"
+export PROJECT_ROOT
 LAMBDA_UNZIPPED_LIMIT=262144000
+export LAMBDA_UNZIPPED_LIMIT
 "$DEPLOY_PYTHON" - <<'PY'
 import os
 from pathlib import Path
@@ -692,10 +732,38 @@ for size, name in tops:
     tag = "  (excluded from zip)" if name.startswith(EXCLUDED_PREFIXES) else ""
     print(f"      {size / (1024 * 1024):8.1f} MB  {name}{tag}")
 
-if site_bytes > budget:
+# The zip is site-packages PLUS the project root. Measuring only the former is
+# what let a 182 MB site-packages pass while AWS rejected the upload: the build
+# venv/ was riding along in the project copy.
+project_root = Path(os.environ.get("PROJECT_ROOT", "."))
+skip_names = set()
+names_file = os.environ.get("EXCLUDE_NAMES_FILE", "")
+if names_file and os.path.exists(names_file):
+    with open(names_file, "r", encoding="utf-8") as fh:
+        skip_names = {line.strip() for line in fh if line.strip()}
+
+project_bytes = 0
+project_tops = []
+for child in project_root.iterdir():
+    if child.name in skip_names:
+        continue
+    size = dir_bytes(child) if child.is_dir() else child.stat().st_size
+    project_bytes += size
+    project_tops.append((size, child.name))
+
+print(f"    Project root (after excludes):  {project_bytes / (1024 * 1024):.1f} MB")
+for size, name in sorted(project_tops, reverse=True)[:5]:
+    if size > 1024 * 1024:
+        print(f"      {size / (1024 * 1024):8.1f} MB  {name}")
+
+total = site_bytes + project_bytes
+print(f"    Estimated unzipped total:       {total / (1024 * 1024):.1f} MB")
+
+if total > budget:
     raise SystemExit(
-        "ERROR: deploy site-packages alone exceed Lambda unzipped budget; "
-        "trim deps, enable slim_handler, or use a Lambda layer."
+        f"ERROR: estimated unzipped package ({total / (1024 * 1024):.1f} MB) exceeds the "
+        f"Lambda budget ({budget / (1024 * 1024):.1f} MB); trim deps, enable slim_handler, "
+        "or use a Lambda layer."
     )
 PY
 
