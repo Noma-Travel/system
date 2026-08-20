@@ -80,6 +80,12 @@ FLIGHT_CHANGE_NOTIFY_REDIRECT=''     # comma-separated: divert ALL user-facing
                                      # unless set).
 FLIGHT_CHANGE_NOTIFY_USER_EMAIL=''   # '0'/'false'/'no' silences the user emails
                                      # (ON by default).
+FLIGHT_CHANGE_FE_BASE_URL=''         # base URL for the deep links in those emails;
+                                     # falls back to FE_BASE_URL / APP_FE_BASE_URL.
+SLACK_WEBHOOK_FLIGHT_CHANGE=''       # incoming webhook of the #alteracoes channel.
+                                     # Only ping: "the desk's payment link now needs
+                                     # settling", after the traveller paid Noma.
+                                     # Empty = that notice is silently skipped.
 
 #---------
 
