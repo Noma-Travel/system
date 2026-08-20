@@ -41,9 +41,22 @@ DEPLOY_VENV="${SCRIPT_DIR}/.venv_deploy"
 # Default: build for AWS Lambda (Linux x86_64, CPython 3.12). Required when running this script on
 # Windows/macOS so pip downloads and installs manylinux wheels; set ZAPPA_LAMBDA_WHEEL_PLATFORM=0
 # to use host wheels (broken on Lambda for native modules like pydantic_core).
+# Two platform tags: pip accepts --platform more than once and takes a wheel that
+# matches ANY of them. manylinux2014 is glibc 2.17; projects have started dropping
+# it for manylinux_2_28 (Pillow did at 12.3.0, published 2026-07-01). With only the
+# old tag, nothing matches, pip quietly falls back to the sdist, and the offline
+# install later fails trying to build it — Pillow's PEP 517 build needs pybind11,
+# which was never downloaded into the wheelhouse.
+#
+# Safe on Lambda: the python3.12 runtime is Amazon Linux 2023 (glibc 2.34), well
+# above the 2.28 these wheels require.
 LAMBDA_PIP_PLATFORM_FLAGS=()
 if [[ "${ZAPPA_LAMBDA_WHEEL_PLATFORM:-1}" != "0" ]]; then
-  LAMBDA_PIP_PLATFORM_FLAGS=(--platform manylinux2014_x86_64 --implementation cp --python-version 312 --abi cp312)
+  LAMBDA_PIP_PLATFORM_FLAGS=(
+    --platform manylinux_2_28_x86_64
+    --platform manylinux2014_x86_64
+    --implementation cp --python-version 312 --abi cp312
+  )
 fi
 
 # Track original environment
@@ -198,12 +211,27 @@ echo "==> Step 2: Capturing current environment (exact versions)"
 pip freeze --exclude-editable > "$FREEZE_FILE.tmp"
 
 # Clean up any malformed lines (git references, local paths, etc.)
+#
+# boto3/botocore/s3transfer are dropped on purpose: the AWS Lambda python3.12
+# runtime already ships them, and botocore is the single largest thing in the
+# bundle (~90 MB unzipped, almost entirely service-model JSON). Shipping our own
+# copy spends most of the 250 MB unzipped limit on code AWS already put there.
+# Excluding them here — rather than in Zappa's `exclude` — also keeps them out
+# of the wheelhouse download, so deploys get faster too.
+#
+# The trade-off is version drift: renglo-lib pins boto3==1.35.38 and the runtime
+# provides its own. The APIs used here (DynamoDB, S3, Cognito, Secrets Manager)
+# are long-stable, so this is low risk — but if a deploy ever fails on a missing
+# boto3 attribute, this is the line that explains why.
 grep -v "^-e " "$FREEZE_FILE.tmp" | \
 grep -v "\.git@" | \
 grep -v "^file://" | \
 grep -v "^noma-mod==" | \
 grep -v "^renglo-api==" | \
 grep -v "^renglo-lib==" | \
+grep -vi "^boto3==" | \
+grep -vi "^botocore==" | \
+grep -vi "^s3transfer==" | \
 grep -E "^[a-zA-Z0-9_-]+" > "$FREEZE_FILE" || touch "$FREEZE_FILE"
 
 rm -f "$FREEZE_FILE.tmp"
@@ -553,18 +581,114 @@ echo "    Pip: $($DEPLOY_PYTHON -m pip --version)"
 echo "    Zappa: $("${ZAPPA_CLI[@]}" --version 2>/dev/null | tail -n 1)"
 echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr -d ' ')"
 
+# Step 11a: Tell Zappa not to package the AWS SDK.
+#
+# The Lambda python3.12 runtime already provides boto3/botocore/s3transfer, and
+# botocore alone is ~90 MB unzipped (service-model JSON) — the difference
+# between fitting in the 250 MB limit and being rejected at upload.
+#
+# This has to be Zappa's `exclude` rather than deleting the files: DEPLOY_SITE is
+# .venv_deploy's site-packages, which is where Zappa itself runs from, and Zappa
+# imports botocore. Removing them would break the deploy tool before it packages
+# anything. `exclude` keeps them installed and leaves them out of the zip.
+#
+# Filtering .freeze.txt alone is also not enough: Step 8d installs the git
+# packages without --no-deps, and renglo-lib declares boto3==1.35.38, so pip puts
+# them back. This is applied to the settings file, so it holds no matter which
+# step reintroduced them.
+echo ""
+echo "==> Step 11a: Excluding AWS SDK from the Lambda zip (runtime provides it)"
+ZAPPA_SETTINGS_FILE="${SCRIPT_DIR}/zappa_settings.json"
+EXCLUDE_NAMES_FILE="${SCRIPT_DIR}/.zappa_exclude_names.txt"
+export EXCLUDE_NAMES_FILE
+rm -f "$EXCLUDE_NAMES_FILE"
+if [[ -f "$ZAPPA_SETTINGS_FILE" ]]; then
+  ZAPPA_SETTINGS_FILE="$ZAPPA_SETTINGS_FILE" STAGE="$STAGE" "$DEPLOY_PYTHON" - <<'PY'
+import json, os
+
+path = os.environ["ZAPPA_SETTINGS_FILE"]
+stage = os.environ["STAGE"]
+
+# Zappa copies both the project and site-packages with
+# shutil.ignore_patterns(*(ZIP_EXCLUDES + exclude)) (zappa/core.py,
+# create_lambda_zip). ignore_patterns fnmatches BASE NAMES, never paths, so any
+# pattern containing a slash silently matches nothing:
+#
+#     venv/*  .venv_deploy/*  .wheelhouse/*  backend-repo/*  __pycache__/*
+#     tests/*  .git/*  .pytest_cache/*  **/handlers/tests/*
+#
+# every one of those is a no-op. That is how the build venv ended up inside the
+# zip: site-packages measured 182 MB, under budget, and AWS still rejected the
+# upload because venv/ rode along on top of it.
+#
+# Rewriting them to their base name is what makes them do what they were
+# written to do. The original patterns are kept — harmless, and it keeps the
+# diff against the secret readable.
+patterns = ["boto3*", "botocore*", "s3transfer*"]
+
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+cfg = data.setdefault(stage, {})
+existing = list(cfg.get("exclude") or [])
+
+def base_name(pattern):
+    """'venv/*' -> 'venv';  '**/handlers/tests/*' -> 'tests';  '*.pyc' -> None."""
+    if "/" not in pattern:
+        return None
+    parts = [p for p in pattern.split("/") if p not in ("**", "*", "")]
+    return parts[-1] if parts else None
+
+repaired = []
+for pattern in existing:
+    name = base_name(pattern)
+    if name and name not in existing and name not in repaired:
+        repaired.append(name)
+
+added = repaired + [p for p in patterns if p not in existing and p not in repaired]
+cfg["exclude"] = existing + added
+
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+
+if repaired:
+    print(f"    repaired path-style patterns (ignore_patterns matches base names only): {repaired}")
+print(f"    exclude for {stage}: {cfg['exclude']}")
+
+# Hand the base-name exclusions to the size preflight so it can measure the
+# project root the way Zappa will actually copy it.
+with open(os.environ["EXCLUDE_NAMES_FILE"], "w", encoding="utf-8") as fh:
+    fh.write("\n".join(p for p in cfg["exclude"] if "/" not in p and "*" not in p))
+
+# exclude is only honoured on the minify path, which is Zappa's default. If it
+# was turned off explicitly, this whole step is a no-op and the zip stays large.
+if cfg.get("minify") is False:
+    print("    WARNING: minify is false for this stage — Zappa ignores `exclude`,")
+    print("             so boto3/botocore will still be packaged.")
+PY
+else
+  echo "    (skip) $(basename "$ZAPPA_SETTINGS_FILE") not found"
+fi
+
 # Step 11b: Preflight unzipped size estimate (Lambda hard limit 262144000 bytes)
 echo ""
 echo "==> Step 11b: Lambda package size preflight"
 export DEPLOY_SITE
+PROJECT_ROOT="$SCRIPT_DIR"
+export PROJECT_ROOT
 LAMBDA_UNZIPPED_LIMIT=262144000
+export LAMBDA_UNZIPPED_LIMIT
 "$DEPLOY_PYTHON" - <<'PY'
 import os
 from pathlib import Path
 
 deploy_site = Path(os.environ["DEPLOY_SITE"])
 limit = int(os.environ.get("LAMBDA_UNZIPPED_LIMIT", "262144000"))
-headroom = 8_000_000
+# site-packages is not the whole zip: the project root, Zappa's handler and the
+# temporarily vendored werkzeug/ ride along too. 8 MB of headroom was not enough
+# — a build passed this check and was still rejected by AWS with "Unzipped size
+# must be smaller than 262144000 bytes", so the gap is larger than that.
+headroom = 30_000_000
 budget = limit - headroom
 
 def dir_bytes(root: Path) -> int:
@@ -579,12 +703,67 @@ def dir_bytes(root: Path) -> int:
                 pass
     return total
 
-site_mb = dir_bytes(deploy_site) / (1024 * 1024)
-print(f"    Deploy site-packages on disk: {site_mb:.1f} MB (budget ~{budget / (1024 * 1024):.1f} MB)")
-if dir_bytes(deploy_site) > budget:
+# Zappa leaves these out of the zip (Step 11a), so counting them here would
+# report a package that is ~90 MB heavier than the one actually uploaded.
+EXCLUDED_PREFIXES = ("boto3", "botocore", "s3transfer")
+
+excluded_bytes = sum(
+    dir_bytes(child)
+    for child in deploy_site.iterdir()
+    if child.is_dir() and child.name.startswith(EXCLUDED_PREFIXES)
+)
+site_bytes = dir_bytes(deploy_site) - excluded_bytes
+site_mb = site_bytes / (1024 * 1024)
+print(
+    f"    Deploy site-packages on disk: {site_mb:.1f} MB "
+    f"(budget ~{budget / (1024 * 1024):.1f} MB; "
+    f"{excluded_bytes / (1024 * 1024):.1f} MB excluded from the zip)"
+)
+
+# Always print the breakdown, not only on failure. AWS rejects the upload with
+# "Unzipped size must be smaller than 262144000 bytes" and nothing about what is
+# big, so the answer has to be in the build log before the upload is attempted.
+tops = sorted(
+    ((dir_bytes(child), child.name) for child in deploy_site.iterdir() if child.is_dir()),
+    reverse=True,
+)[:15]
+print("    Largest packages:")
+for size, name in tops:
+    tag = "  (excluded from zip)" if name.startswith(EXCLUDED_PREFIXES) else ""
+    print(f"      {size / (1024 * 1024):8.1f} MB  {name}{tag}")
+
+# The zip is site-packages PLUS the project root. Measuring only the former is
+# what let a 182 MB site-packages pass while AWS rejected the upload: the build
+# venv/ was riding along in the project copy.
+project_root = Path(os.environ.get("PROJECT_ROOT", "."))
+skip_names = set()
+names_file = os.environ.get("EXCLUDE_NAMES_FILE", "")
+if names_file and os.path.exists(names_file):
+    with open(names_file, "r", encoding="utf-8") as fh:
+        skip_names = {line.strip() for line in fh if line.strip()}
+
+project_bytes = 0
+project_tops = []
+for child in project_root.iterdir():
+    if child.name in skip_names:
+        continue
+    size = dir_bytes(child) if child.is_dir() else child.stat().st_size
+    project_bytes += size
+    project_tops.append((size, child.name))
+
+print(f"    Project root (after excludes):  {project_bytes / (1024 * 1024):.1f} MB")
+for size, name in sorted(project_tops, reverse=True)[:5]:
+    if size > 1024 * 1024:
+        print(f"      {size / (1024 * 1024):8.1f} MB  {name}")
+
+total = site_bytes + project_bytes
+print(f"    Estimated unzipped total:       {total / (1024 * 1024):.1f} MB")
+
+if total > budget:
     raise SystemExit(
-        "ERROR: deploy site-packages alone exceed Lambda unzipped budget; "
-        "trim deps, enable slim_handler, or use a Lambda layer."
+        f"ERROR: estimated unzipped package ({total / (1024 * 1024):.1f} MB) exceeds the "
+        f"Lambda budget ({budget / (1024 * 1024):.1f} MB); trim deps, enable slim_handler, "
+        "or use a Lambda layer."
     )
 PY
 

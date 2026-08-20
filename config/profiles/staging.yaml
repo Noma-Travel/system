@@ -10,6 +10,11 @@ SYS_ENV: noma_staging
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
 NOMA_APPROVAL_ENFORCEMENT: "on"
+# DATA_API_RING_POLICY is intentionally absent. The rings the /v1 resources own
+# are declared by noma/api/{trips,payment_methods}.py and applied in
+# noma.api.register(), so they are closed whether or not this file says so.
+# Setting it here too would be a second source of truth that can drift.
+# Add it only to close a ring no resource owns; it can never open one.
 SYSTEM_ADMIN_EMAILS: antoniojardim@travelwithnoma.com,jpcastroneves@travelwithnoma.com
 SYSTEM_ADMIN_USER_IDS: 5bd438a5e,18f25b74f
 NOMA_E2E_SEED_ALLOWED: "1"

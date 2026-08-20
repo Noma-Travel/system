@@ -141,6 +141,31 @@ jobs:
               print(f"ERROR: Missing required zappa env vars: {', '.join(missing)}")
               sys.exit(1)
 
+          # DATA_API_RING_POLICY is optional here, and deliberately so.
+          #
+          # It was required for one day. That was wrong twice over: the rings a
+          # /v1 resource owns are closed by noma.api.register() regardless of
+          # config, so the requirement was redundant; and it only ran on a push to
+          # this repo, not on the repository_dispatch that a code repo fires — so
+          # it blocked the safe path while the unguarded one deployed anyway.
+          #
+          # What is still worth checking is the shape, for rings added here on top
+          # of the declared ones: a typo'd mode is ignored at runtime (fail-open,
+          # so a typo cannot take the data API down) and would be invisible.
+          bad_policy = []
+          for entry in str(env.get("DATA_API_RING_POLICY", "")).split(","):
+              if not entry.strip():
+                  continue
+              ring, sep, mode = entry.partition(":")
+              if not sep or not ring.strip() or mode.strip().lower() not in ("deny", "deny_write"):
+                  bad_policy.append(entry.strip())
+          if bad_policy:
+              print(
+                  "ERROR: DATA_API_RING_POLICY entries must be '<ring>:deny' or "
+                  f"'<ring>:deny_write'. Bad: {', '.join(bad_policy)}"
+              )
+              sys.exit(1)
+
           def normalize_origin(value: str) -> str:
               v = (value or "").strip().rstrip("/")
               p = urlparse(v)
