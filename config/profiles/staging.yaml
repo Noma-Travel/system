@@ -38,3 +38,17 @@ VITE_EXTENSIONS: schd,data,backend
 VITE_WL_LOGO: /small_logo.jpg
 VITE_WL_LOGIN: /large_logo.jpg
 VITE_DEV_MODE: "true"
+
+# ── Flight-change negotiation agent ──────────────────────────────────────────
+# Runbook: extensions/backend/docs/AGENTE_TROCA_DE_VOO.md
+# Secrets (RESEND_API_KEY, RESEND_WEBHOOK_SECRET, SLACK_WEBHOOK_FLIGHT_CHANGE)
+# do NOT live here — see config/README.md.
+FLIGHT_CHANGE_INBOUND_DOMAIN: email.travelwithnoma.com
+# Must sit on the Resend-verified SENDING domain (the email. subdomain).
+# The parent travelwithnoma.com has no Resend DKIM — its MX is Microsoft 365.
+FLIGHT_CHANGE_EMAIL_FROM: Noma Travel <noma@email.travelwithnoma.com>
+FLIGHT_CHANGE_PROVIDER_EMAIL: br1.nac@rexturadvance.com.br
+# TODO: set a TEAM alias, not a personal inbox. This address is BCC'd on every
+# desk e-mail and every user notice, and is the fallback recipient when no user
+# identity resolves. Empty means nobody on the team sees the negotiations.
+FLIGHT_CHANGE_EMAIL_OBSERVER: ""

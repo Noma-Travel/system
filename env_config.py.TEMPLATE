@@ -50,6 +50,43 @@ RESEND_API_KEY=''
 INVITE_FROM='Noma <noreply@example.com>'
 SES_INVITE_SENDER='noreply@example.com'
 
+# Flight-change negotiation agent (flight_change_react / flight_change_inbound)
+FLIGHT_CHANGE_PROVIDER_EMAIL=''      # default desk address when kickoff omits provider.contact_email
+FLIGHT_CHANGE_EMAIL_OBSERVER=''      # silent BCC on every negotiation email (comma-separated)
+FLIGHT_CHANGE_EMAIL_FROM=''          # From header; defaults to _provider_email.FROM_ADDRESS
+FLIGHT_CHANGE_INBOUND_DOMAIN=''      # Resend Inbound domain for reply+ addresses. Prod: your MX-verified
+                                     # domain (e.g. email.travelwithnoma.com). For testing with no DNS, use the
+                                     # auto-provisioned Resend receiving subdomain (Dashboard → Emails → Receiving),
+                                     # e.g. <id>.resend.app — accepts any local part incl. the reply+ token.
+FLIGHT_CHANGE_EMAIL_DRY_RUN=''       # '1' logs instead of calling Resend
+RESEND_WEBHOOK_SECRET=''             # Svix signing secret for the inbound webhook. REQUIRED on a
+                                     # deployed env: the inbound route is public and unauthenticated,
+                                     # so this signature is the only thing separating a real desk
+                                     # reply from a forged quote + payment link. Unset in Lambda =>
+                                     # inbound webhooks are REJECTED (see flight_change_inbound).
+FLIGHT_CHANGE_ALLOW_UNSIGNED_WEBHOOK=''  # '1' to accept unsigned inbound mail on a deployed env.
+                                     # Bootstrap only: Resend issues the signing secret after the
+                                     # endpoint is registered. Clear it as soon as the secret is set.
+FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER=''        # hours before a case the desk never
+                                     # answered is parked as 'stalled' (default 24).
+FLIGHT_CHANGE_TIMEOUT_AWAITING_PROVIDER_REISSUE=''  # same, after we've already paid
+                                     # (default 72 — longer rope before nagging).
+FLIGHT_CHANGE_MODEL=''               # model for the email-comprehension decider
+                                     # (default gpt-4o). One call per inbound mail;
+                                     # cost is negligible next to a booking, so
+                                     # prefer capability over price here.
+FLIGHT_CHANGE_NOTIFY_REDIRECT=''     # comma-separated: divert ALL user-facing
+                                     # flight-change email here (testing aid, off
+                                     # unless set).
+FLIGHT_CHANGE_NOTIFY_USER_EMAIL=''   # '0'/'false'/'no' silences the user emails
+                                     # (ON by default).
+FLIGHT_CHANGE_FE_BASE_URL=''         # base URL for the deep links in those emails;
+                                     # falls back to FE_BASE_URL / APP_FE_BASE_URL.
+SLACK_WEBHOOK_FLIGHT_CHANGE=''       # incoming webhook of the #alteracoes channel.
+                                     # Only ping: "the desk's payment link now needs
+                                     # settling", after the traveller paid Noma.
+                                     # Empty = that notice is silently skipped.
+
 #---------
 
 #WEB SOCKET
