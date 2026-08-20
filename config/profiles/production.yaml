@@ -44,7 +44,9 @@ VITE_DEV_MODE: "false"
 # Secrets (RESEND_API_KEY, RESEND_WEBHOOK_SECRET, SLACK_WEBHOOK_FLIGHT_CHANGE)
 # do NOT live here — see config/README.md.
 FLIGHT_CHANGE_INBOUND_DOMAIN: email.travelwithnoma.com
-FLIGHT_CHANGE_EMAIL_FROM: Noma Travel <email@travelwithnoma.com>
+# Must sit on the Resend-verified SENDING domain (the email. subdomain).
+# The parent travelwithnoma.com has no Resend DKIM — its MX is Microsoft 365.
+FLIGHT_CHANGE_EMAIL_FROM: Noma Travel <noma@email.travelwithnoma.com>
 FLIGHT_CHANGE_PROVIDER_EMAIL: br1.nac@rexturadvance.com.br
 # TODO: set a TEAM alias, not a personal inbox. This address is BCC'd on every
 # desk e-mail and every user notice, and is the fallback recipient when no user
