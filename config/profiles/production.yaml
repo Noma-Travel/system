@@ -9,6 +9,7 @@ API_GATEWAY_ARN: arn:aws:execute-api:us-east-1:158711196499:u8za3vvgbb
 SYS_ENV: noma_prod
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
+# NOMA_OWN_APP stays unset here. Staging only until Rextur smoke passes.
 # DATA_API_RING_POLICY is intentionally absent. The rings the /v1 resources own
 # are declared by noma/api/{trips,payment_methods}.py and applied in
 # noma.api.register(), so they are closed whether or not this file says so.

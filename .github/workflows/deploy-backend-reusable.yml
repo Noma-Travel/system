@@ -111,6 +111,50 @@ jobs:
       - name: Write zappa_settings.json from secret
         run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
 
+      - name: Apply NOMA_OWN_APP from versioned profile
+        env:
+          ZAPPA_STAGE: ${{ inputs.zappa_stage }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          KEY = "NOMA_OWN_APP"
+          stage_name = os.environ["ZAPPA_STAGE"]
+          profile = "staging" if stage_name == "noma_staging" else "production"
+          path = Path("config/profiles") / f"{profile}.yaml"
+
+          value = None
+          for raw in path.read_text(encoding="utf-8").splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#") or ":" not in line:
+                  continue
+              key, _, raw_value = line.partition(":")
+              if key.strip() == KEY:
+                  value = raw_value.strip().strip("'").strip('"') or None
+                  break
+
+          with open("zappa_settings.json", encoding="utf-8") as fh:
+              data = json.load(fh)
+          stage = data.get(stage_name)
+          if not isinstance(stage, dict):
+              raise SystemExit(f"stage {stage_name!r} missing from zappa_settings.json")
+          env = stage.setdefault("environment_variables", {})
+          if not isinstance(env, dict):
+              raise SystemExit(f"stage {stage_name!r} environment_variables is not an object")
+          before = env.get(KEY)
+          if value:
+              env[KEY] = value
+              action = f"set {KEY}={value!r}"
+          else:
+              env.pop(KEY, None)
+              action = f"unset {KEY}"
+          print(f"profile={path} before={before!r} {action}")
+          with open("zappa_settings.json", "w", encoding="utf-8") as fh:
+              json.dump(data, fh, ensure_ascii=False)
+          PY
+
       - name: Validate Zappa settings for stage
         env:
           ZAPPA_STAGE: ${{ inputs.zappa_stage }}

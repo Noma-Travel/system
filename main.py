@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from renglo_api import create_app
+from noma.runtime.boot import create_app_for_process
 import logging
 import os
 import sys
@@ -138,7 +138,7 @@ def main():
     # Always load env_config.py from this file's directory (not process cwd).
     # This avoids config drift under debug reloaders or alternate launch dirs.
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'env_config.py')
-    app = create_app(config_path=config_path)
+    app = create_app_for_process(config_path=config_path)
     
     # Option 2: Pass config directly (uncomment to use)
     # config = {
