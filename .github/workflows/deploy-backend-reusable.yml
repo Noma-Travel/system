@@ -121,19 +121,20 @@ jobs:
           from pathlib import Path
 
           KEY = "NOMA_OWN_APP"
+          POLICY_KEY = "DATA_API_RING_POLICY"
           stage_name = os.environ["ZAPPA_STAGE"]
           profile = "staging" if stage_name == "noma_staging" else "production"
           path = Path("config/profiles") / f"{profile}.yaml"
 
-          value = None
+          profile_vars = {}
           for raw in path.read_text(encoding="utf-8").splitlines():
               line = raw.strip()
               if not line or line.startswith("#") or ":" not in line:
                   continue
               key, _, raw_value = line.partition(":")
-              if key.strip() == KEY:
-                  value = raw_value.strip().strip("'").strip('"') or None
-                  break
+              profile_vars[key.strip()] = raw_value.strip().strip("'").strip('"')
+
+          value = profile_vars.get(KEY) or None
 
           with open("zappa_settings.json", encoding="utf-8") as fh:
               data = json.load(fh)
@@ -150,7 +151,14 @@ jobs:
           else:
               env.pop(KEY, None)
               action = f"unset {KEY}"
-          print(f"profile={path} before={before!r} {action}")
+          # Staging Lambda env is already at the 4KB cap. The versioned
+          # profile deliberately omits DATA_API_RING_POLICY (noma.api.register
+          # composes the rings). Dropping the leftover secret key is what
+          # makes room for NOMA_OWN_APP. Production is untouched.
+          dropped_policy = False
+          if stage_name == "noma_staging" and POLICY_KEY not in profile_vars:
+              dropped_policy = env.pop(POLICY_KEY, None) is not None
+          print(f"profile={path} before={before!r} {action} dropped_{POLICY_KEY}={dropped_policy}")
           with open("zappa_settings.json", "w", encoding="utf-8") as fh:
               json.dump(data, fh, ensure_ascii=False)
           PY
