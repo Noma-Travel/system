@@ -13,8 +13,8 @@ NOMA_APPROVAL_ENFORCEMENT: "on"
 # Z1/Z2: Noma factory + dispatcher. Unset keeps renglo_api.create_app.
 # Production must not set this until staging Rextur smoke passes.
 NOMA_OWN_APP: "1"
-# Z6 PR D: unmount app_schd after product /v1 cutover (cron + webhooks + front fallbacks gone).
-NOMA_UNMOUNT_BLUEPRINTS: "blueprint,search,state,session,docs,data,schd"
+# Z6 PR C2+D: unmount app_schd + app_auth after /v1 cutover (chat stays mounted).
+NOMA_UNMOUNT_BLUEPRINTS: "blueprint,search,state,session,docs,data,schd,auth"
 # DATA_API_RING_POLICY is intentionally absent. The rings the /v1 resources own
 # are declared by noma/api/{trips,payment_methods}.py and applied in
 # noma.api.register(), so they are closed whether or not this file says so.
