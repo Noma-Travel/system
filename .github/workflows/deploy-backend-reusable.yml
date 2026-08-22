@@ -111,7 +111,7 @@ jobs:
       - name: Write zappa_settings.json from secret
         run: echo '${{ secrets.ZAPPA_SETTINGS }}' > zappa_settings.json
 
-      - name: Apply NOMA_OWN_APP from versioned profile
+      - name: Apply Noma boot env from versioned profile
         env:
           ZAPPA_STAGE: ${{ inputs.zappa_stage }}
         run: |
@@ -121,6 +121,7 @@ jobs:
           from pathlib import Path
 
           KEY = "NOMA_OWN_APP"
+          UNMOUNT_KEY = "NOMA_UNMOUNT_BLUEPRINTS"
           POLICY_KEY = "DATA_API_RING_POLICY"
           stage_name = os.environ["ZAPPA_STAGE"]
           profile = "staging" if stage_name == "noma_staging" else "production"
@@ -134,8 +135,6 @@ jobs:
               key, _, raw_value = line.partition(":")
               profile_vars[key.strip()] = raw_value.strip().strip("'").strip('"')
 
-          value = profile_vars.get(KEY) or None
-
           with open("zappa_settings.json", encoding="utf-8") as fh:
               data = json.load(fh)
           stage = data.get(stage_name)
@@ -144,13 +143,17 @@ jobs:
           env = stage.setdefault("environment_variables", {})
           if not isinstance(env, dict):
               raise SystemExit(f"stage {stage_name!r} environment_variables is not an object")
-          before = env.get(KEY)
-          if value:
-              env[KEY] = value
-              action = f"set {KEY}={value!r}"
-          else:
-              env.pop(KEY, None)
-              action = f"unset {KEY}"
+
+          actions = []
+          for sync_key in (KEY, UNMOUNT_KEY):
+              value = profile_vars.get(sync_key) or None
+              before = env.get(sync_key)
+              if value:
+                  env[sync_key] = value
+                  actions.append(f"set {sync_key}={value!r}")
+              else:
+                  env.pop(sync_key, None)
+                  actions.append(f"unset {sync_key} (was {before!r})")
           # Staging Lambda env is already at the 4KB cap. The versioned
           # profile deliberately omits DATA_API_RING_POLICY (noma.api.register
           # composes the rings). Dropping the leftover secret key is what
@@ -158,7 +161,7 @@ jobs:
           dropped_policy = False
           if stage_name == "noma_staging" and POLICY_KEY not in profile_vars:
               dropped_policy = env.pop(POLICY_KEY, None) is not None
-          print(f"profile={path} before={before!r} {action} dropped_{POLICY_KEY}={dropped_policy}")
+          print(f"profile={path} {'; '.join(actions)} dropped_{POLICY_KEY}={dropped_policy}")
           with open("zappa_settings.json", "w", encoding="utf-8") as fh:
               json.dump(data, fh, ensure_ascii=False)
           PY
