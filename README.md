@@ -317,9 +317,9 @@ It is the same URL that appears when you deploy something with Zappa
 - c. Look for the Invoke URL
 
 
-integration_target = integration_target_base + "/_chat/message"
+integration_target = integration_target_base + "/v1/chat/message"
 
-Example: "https://abcdef1234.execute-api.us-east-1.amazonaws.com/something_prod_0305a/_chat/message"
+Example: "https://abcdef1234.execute-api.us-east-1.amazonaws.com/something_prod_0305a/v1/chat/message"
 
 Step 4 > Stages
 Stage name: <environment>  (prod|dev)

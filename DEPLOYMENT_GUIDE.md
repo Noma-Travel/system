@@ -160,7 +160,7 @@ For the current Noma production stack (`noma_prod_websocket`), the WebSocket Api
 - `NEXT_PUBLIC_CHAT_WS` = `wss://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production`
 - `WEBSOCKET_CONNECTIONS` = `https://3vdnaldxj0.execute-api.us-east-1.amazonaws.com/production`
 
-**`$connect` and JWT:** Full WebSocket setup (routes, `chat_message` → `POST …/_chat/message`, and `$connect` / `$disconnect` as **MOCK** integrations) is described in the launcher repo: `dev/launcher/ENVIRONMENT_README.md` §7 and `dev/launcher/scripts/create_websocket_api.py`. With MOCK `$connect`, API Gateway does **not** validate the `?auth=` query string at connect time; the Cognito JWT is validated when messages hit `/_chat/message` (`socket_auth_required` in `renglo-api`).
+**`$connect` and JWT:** Full WebSocket setup (routes, `chat_message` → `POST …/v1/chat/message`, and `$connect` / `$disconnect` as **MOCK** integrations) is described in the launcher repo: `dev/launcher/ENVIRONMENT_README.md` §7 and `dev/launcher/scripts/create_websocket_api.py`. With MOCK `$connect`, API Gateway does **not** validate the `?auth=` query string at connect time; the Cognito JWT is validated when messages hit `/v1/chat/message` (`socket_auth_required` in `renglo-api`).
 
 ---
 
@@ -411,7 +411,7 @@ Notes:
 
 ### 9c) Per-org provisioning (automatic on org creation)
 
-When a new org is created via `POST /_auth/orgs/<portfolio_id>`, the backend's `create_org_funnel` automatically runs `NomaOnboardings` which:
+When a new org is created via `POST /v1/orgs/<portfolio_id>`, the backend's `create_org_funnel` automatically runs `NomaOnboardings` which:
 
 1. Creates NOMA and SCHD tool entities + relationships.
 2. Uploads tools/actions catalogs (`schd_tools`, `schd_actions`) via `UploadToolsAndActions`.
@@ -421,7 +421,7 @@ When a new org is created via `POST /_auth/orgs/<portfolio_id>`, the backend's `
 
 **No manual Console upload of tools/actions is needed for new orgs.** If the API returns HTTP 207, the org was created but tool provisioning failed—check CloudWatch logs for `create_org_funnel | install_default_tools` entries.
 
-To repair an org that was created before this automation (or where provisioning failed), run `noma_post_deploy_org.py` with `--portfolio` and `--org` flags, or call `/_schd/run/noma/noma_onboardings` with `{portfolio, team, org}`.
+To repair an org that was created before this automation (or where provisioning failed), run `noma_post_deploy_org.py` with `--portfolio` and `--org` flags, or call `POST /v1/<portfolio>/<org>/onboardings` with `{portfolio, team, org}`.
 
 ### 9c) Environment config updates
 
@@ -452,7 +452,7 @@ With a fresh user:
 - If the browser shows **CORS** errors after backend deploy, first confirm the API is not returning **502** (Lambda import/runtime failure); then re-check `FE_BASE_URL` / `APP_FE_BASE_URL` and redeploy backend if needed.
 - If testing local frontend against deployed backend, temporarily enable `ALLOW_DEV_ORIGINS` and redeploy backend.
 - If onboarding data looks stale after resets, refresh tree cache and rerun the post-deploy setup sequence.
-- If chat connects but no answer arrives, inspect `/_chat/message` path in CloudWatch and confirm the handler in `core` executed successfully (not blocked by import/runtime errors).
+- If chat connects but no answer arrives, inspect `/v1/chat/message` path in CloudWatch and confirm the handler in `core` executed successfully (not blocked by import/runtime errors).
 - If plan/action executes but UI receives fallback text instead of cards, inspect the tool `handler_call` log result first; many "no results" responses are downstream of tool exceptions.
 
 ---
