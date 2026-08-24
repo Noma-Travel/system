@@ -219,10 +219,10 @@ pip freeze --exclude-editable > "$FREEZE_FILE.tmp"
 # Excluding them here — rather than in Zappa's `exclude` — also keeps them out
 # of the wheelhouse download, so deploys get faster too.
 #
-# The trade-off is version drift: renglo-lib pins boto3==1.35.38 and the runtime
-# provides its own. The APIs used here (DynamoDB, S3, Cognito, Secrets Manager)
-# are long-stable, so this is low risk — but if a deploy ever fails on a missing
-# boto3 attribute, this is the line that explains why.
+# The trade-off is version drift: the Lambda runtime provides boto3. The APIs
+# used here (DynamoDB, S3, Cognito, Secrets Manager) are long-stable, so this
+# is low risk — but if a deploy ever fails on a missing boto3 attribute, this
+# is the line that explains why.
 grep -v "^-e " "$FREEZE_FILE.tmp" | \
 grep -v "\.git@" | \
 grep -v "^file://" | \
@@ -449,26 +449,18 @@ fi
 # Then install local packages directly from source (not as wheels)
 if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   echo "    Installing local packages from source..."
-  
-  # Install in dependency order: renglo-lib first
   for src in "${EDITABLE_PATHS[@]}"; do
-    if [[ "$src" =~ renglo-lib ]]; then
-      echo "      - $(basename "$src")"
-      "$DEPLOY_PYTHON" -m pip install "$src" --no-deps
+    if [[ "$src" =~ renglo-lib || "$src" =~ renglo-api ]]; then
+      echo "      skip $(basename "$src") (Z8-C: not installed into the Lambda zip)"
+      continue
     fi
-  done
-  
-  # Then install others
-  for src in "${EDITABLE_PATHS[@]}"; do
-    if [[ ! "$src" =~ renglo-lib ]]; then
-      echo "      - $(basename "$src")"
-      "$DEPLOY_PYTHON" -m pip install "$src" --no-deps
-    fi
+    echo "      - $(basename "$src")"
+    "$DEPLOY_PYTHON" -m pip install "$src" --no-deps
   done
 fi
 
-# Step 8d: Git-installed packages (renglo-*, noma-mod) are stripped from the
-# freeze file and ../dev paths are absent on GitHub Actions. Install them explicitly for CI.
+# Step 8d: noma-mod + langfuse are stripped from the freeze file (git+ / local
+# paths). Install them explicitly for CI. renglo-* must not be in this file.
 echo ""
 REQ_CI_FILE="${REQUIREMENTS_CI_FILE:-requirements.ci.txt}"
 echo "==> Step 8d: Installing CI git packages from $REQ_CI_FILE"
@@ -479,37 +471,40 @@ if [[ -f "$REQ_CI_FILE" ]]; then
     "$DEPLOY_PYTHON" -m pip install --no-cache-dir -r "$REQ_CI_FILE" --target "$DEPLOY_SITE" --upgrade
   fi
   echo "    Verifying CI package imports..."
-  # find_spec only checks install layout; importing renglo_api runs create_app() and needs Cognito env.
   "$DEPLOY_PYTHON" -c "import importlib.util
-for mod in ('renglo_api', 'renglo', 'noma', 'langfuse'):
+for mod in ('noma', 'langfuse'):
     assert importlib.util.find_spec(mod), mod
+for mod in ('renglo', 'renglo_api'):
+    assert importlib.util.find_spec(mod) is None, mod
 from langfuse.openai import OpenAI  # noqa: F401 — required at Lambda cold start via agent_utilities
-print('    CI packages import OK')" || {
-    echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv" >&2
+print('    CI packages import OK; renglo absent')" || {
+    echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv (or renglo still present)" >&2
     exit 1
   }
 else
   echo "    (skip) $REQ_CI_FILE not found"
 fi
 
-# Step 8b: Freeze + --target may install renglo-* from pip's cached wheel (stale vs your working tree).
-# Always refresh renglo-lib / renglo-api from ../dev so Lambda gets the same code you edit locally.
 echo ""
-echo "==> Step 8b: Refresh renglo-lib and renglo-api from dev tree (no stale pip cache)"
-_RENGLO_LIB="${SCRIPT_DIR}/../dev/renglo-lib"
-_RENGLO_API="${SCRIPT_DIR}/../dev/renglo-api"
-if [[ -d "$_RENGLO_LIB" ]]; then
-  echo "    pip install --force-reinstall: $_RENGLO_LIB"
-  "$DEPLOY_PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps "$_RENGLO_LIB"
-else
-  echo "    (skip) not found: $_RENGLO_LIB"
+echo "==> Step 8e: Assert renglo absent from deploy site-packages"
+_renglo_hit=0
+for name in renglo renglo_api; do
+  if [[ -d "$DEPLOY_SITE/$name" ]]; then
+    echo "ERROR: $DEPLOY_SITE/$name still present" >&2
+    _renglo_hit=1
+  fi
+done
+shopt -s nullglob
+for dist in "$DEPLOY_SITE"/renglo*.dist-info; do
+  echo "ERROR: leftover dist-info: $dist" >&2
+  _renglo_hit=1
+done
+shopt -u nullglob
+if [[ "$_renglo_hit" -ne 0 ]]; then
+  echo "ERROR: renglo* still in deploy site-packages; do not package" >&2
+  exit 1
 fi
-if [[ -d "$_RENGLO_API" ]]; then
-  echo "    pip install --force-reinstall: $_RENGLO_API"
-  "$DEPLOY_PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps "$_RENGLO_API"
-else
-  echo "    (skip) not found: $_RENGLO_API"
-fi
+echo "    site-packages has no renglo/ or renglo_api/"
 
 # Step 8c: Zappa's Windows+manylinux zip merge can omit pure-Python packages from site-packages
 # even when they import in the deploy venv. Zappa's handler.py imports werkzeug before the app
@@ -592,10 +587,9 @@ echo "    Total packages: $($DEPLOY_PYTHON -m pip list | tail -n +3 | wc -l | tr
 # imports botocore. Removing them would break the deploy tool before it packages
 # anything. `exclude` keeps them installed and leaves them out of the zip.
 #
-# Filtering .freeze.txt alone is also not enough: Step 8d installs the git
-# packages without --no-deps, and renglo-lib declares boto3==1.35.38, so pip puts
-# them back. This is applied to the settings file, so it holds no matter which
-# step reintroduced them.
+# Filtering .freeze.txt alone is also not enough: later pip installs without
+# --no-deps can put boto3 back. This is applied to the settings file, so it
+# holds no matter which step reintroduced them.
 echo ""
 echo "==> Step 11a: Excluding AWS SDK from the Lambda zip (runtime provides it)"
 ZAPPA_SETTINGS_FILE="${SCRIPT_DIR}/zappa_settings.json"

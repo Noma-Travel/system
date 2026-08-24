@@ -6,8 +6,6 @@ on:
   repository_dispatch:
     types:
       - backend-staging-updated
-      - renglo-lib-staging-updated
-      - renglo-api-staging-updated
       - schd-staging-updated
 
 concurrency:

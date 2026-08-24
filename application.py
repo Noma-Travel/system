@@ -12,7 +12,7 @@ from noma.runtime.boot import create_app_for_process
 
 # Create application instance
 # Config will be loaded from env_config.py in this directory.
-# Default factory is still renglo_api.create_app; NOMA_OWN_APP=1 selects Noma.
+# Process factory is noma.runtime.app.create_app (NOMA_OWN_APP is ignored).
 app = create_app_for_process()
 
 if __name__ == '__main__':
