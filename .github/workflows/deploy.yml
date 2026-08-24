@@ -8,7 +8,6 @@ on:
       - backend-main-updated
       - renglo-lib-main-updated
       - renglo-api-main-updated
-      - pes-noma-main-updated
       - schd-main-updated
 
 concurrency:

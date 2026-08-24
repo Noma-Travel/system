@@ -467,7 +467,7 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   done
 fi
 
-# Step 8d: Git-installed packages (renglo-*, noma-mod, pes-noma-mod) are stripped from the
+# Step 8d: Git-installed packages (renglo-*, noma-mod) are stripped from the
 # freeze file and ../dev paths are absent on GitHub Actions. Install them explicitly for CI.
 echo ""
 REQ_CI_FILE="${REQUIREMENTS_CI_FILE:-requirements.ci.txt}"
