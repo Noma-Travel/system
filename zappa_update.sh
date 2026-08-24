@@ -476,19 +476,8 @@ assert importlib.util.find_spec('noma.runtime.env_config') is None, 'env_config'
 for mod in ('renglo', 'renglo' + '_api'):
     assert importlib.util.find_spec(mod) is None, mod
 from openai import OpenAI  # noqa: F401 — agent_utilities cold start
-from noma.runtime.app import create_app
-app = create_app(config={
-    'SECRET_KEY': 'ci-packaging-check',
-    'CACHE_TYPE': 'NullCache',
-    'COGNITO_REGION': 'us-east-1',
-    'COGNITO_USERPOOL_ID': 'us-east-1_ci',
-    'COGNITO_APP_CLIENT_ID': 'ci',
-    'COGNITO_CHECK_TOKEN_EXPIRATION': False,
-    'FE_BASE_URL': 'http://localhost:3000',
-})
-rv = app.test_client().get('/')
-assert rv.status_code == 200, rv.status
-print('    CI packages import OK; GET / 200; platform packages absent')" || {
+from noma.runtime.app import create_app  # noqa: F401 — application.py cold start
+print('    CI packages import OK; platform packages absent')" || {
     echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv (or renglo still present)" >&2
     exit 1
   }
@@ -555,6 +544,27 @@ echo "==> Step 9: Ensuring Zappa CLI can import botocore"
 "$DEPLOY_PYTHON" -m pip install --upgrade 'zappa>=0.59.0' 'boto3>=1.17.28' -q
 "$DEPLOY_PYTHON" -c "import botocore, boto3, zappa; print('    zappa + botocore import OK')" || {
   echo "ERROR: Zappa CLI cannot import botocore in the deploy venv" >&2
+  exit 1
+}
+
+# create_app() pulls noma.store → boto3. Step 8d cannot instantiate: freeze
+# strips the AWS SDK and Lambda supplies it at runtime. With boto3 in the CLI
+# venv we can smoke GET / here; Step 11a still keeps the SDK out of the zip.
+echo "    Verifying create_app GET / ..."
+"$DEPLOY_PYTHON" -c "from noma.runtime.app import create_app
+app = create_app(config={
+    'SECRET_KEY': 'ci-packaging-check',
+    'CACHE_TYPE': 'NullCache',
+    'COGNITO_REGION': 'us-east-1',
+    'COGNITO_USERPOOL_ID': 'us-east-1_ci',
+    'COGNITO_APP_CLIENT_ID': 'ci',
+    'COGNITO_CHECK_TOKEN_EXPIRATION': False,
+    'FE_BASE_URL': 'http://localhost:3000',
+})
+rv = app.test_client().get('/')
+assert rv.status_code == 200, rv.status
+print('    GET / 200')" || {
+  echo "ERROR: create_app GET / failed in deploy venv" >&2
   exit 1
 }
 
