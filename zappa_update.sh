@@ -212,17 +212,11 @@ pip freeze --exclude-editable > "$FREEZE_FILE.tmp"
 
 # Clean up any malformed lines (git references, local paths, etc.)
 #
-# boto3/botocore/s3transfer are dropped on purpose: the AWS Lambda python3.12
-# runtime already ships them, and botocore is the single largest thing in the
-# bundle (~90 MB unzipped, almost entirely service-model JSON). Shipping our own
-# copy spends most of the 250 MB unzipped limit on code AWS already put there.
-# Excluding them here — rather than in Zappa's `exclude` — also keeps them out
-# of the wheelhouse download, so deploys get faster too.
-#
-# The trade-off is version drift: the Lambda runtime provides boto3. The APIs
-# used here (DynamoDB, S3, Cognito, Secrets Manager) are long-stable, so this
-# is low risk — but if a deploy ever fails on a missing boto3 attribute, this
-# is the line that explains why.
+# boto3/botocore/s3transfer are dropped from the freeze (and thus the
+# wheelhouse) on purpose: the AWS Lambda python3.12 runtime already ships
+# them, and botocore is ~90 MB unzipped. They are reinstalled into THIS
+# deploy venv in Step 9 so `python -m zappa.cli` can talk to AWS, then
+# stripped from the zip by Step 11a `exclude`. Do not put them back here.
 grep -v "^-e " "$FREEZE_FILE.tmp" | \
 grep -v "\.git@" | \
 grep -v "^file://" | \
@@ -534,15 +528,18 @@ fi
 
 echo "    Installation complete"
 
-# Step 9: Ensure Zappa is installed
+# Step 9: Zappa CLI + AWS SDK for the *deploy machine*.
+# Freeze install uses --no-deps and strips boto3, so a zappa line in the freeze
+# lands without botocore. `pip show zappa` then skips this step and Step 13
+# dies with ModuleNotFoundError: botocore. Always install the CLI deps here;
+# Step 11a exclude keeps them out of the Lambda zip.
 echo ""
-echo "==> Step 9: Ensuring Zappa is installed"
-if ! "$DEPLOY_PYTHON" -m pip show zappa >/dev/null 2>&1; then
-  echo "    Installing zappa..."
-  "$DEPLOY_PYTHON" -m pip install zappa -q
-else
-  echo "    Zappa already installed"
-fi
+echo "==> Step 9: Ensuring Zappa CLI can import botocore"
+"$DEPLOY_PYTHON" -m pip install --upgrade 'zappa>=0.59.0' 'boto3>=1.17.28' -q
+"$DEPLOY_PYTHON" -c "import botocore, boto3, zappa; print('    zappa + botocore import OK')" || {
+  echo "ERROR: Zappa CLI cannot import botocore in the deploy venv" >&2
+  exit 1
+}
 
 # Zappa entry point: `pip install --target` does not install console_scripts (no Scripts/zappa.exe).
 # Use the CLI module (zappa has no top-level __main__).
