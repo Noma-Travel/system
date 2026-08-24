@@ -19,7 +19,7 @@ for _rel in ("extensions/backend/package", str(_system_dir)):
         sys.path.insert(0, _p)
 
 from noma.runtime import create_app
-from noma.runtime.env_config import load_env_config
+from noma.runtime.process_env import load_env_config
 
 
 def test_configuration():

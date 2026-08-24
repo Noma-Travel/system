@@ -466,13 +466,29 @@ if [[ -f "$REQ_CI_FILE" ]]; then
   fi
   echo "    Verifying CI package imports..."
   "$DEPLOY_PYTHON" -c "import importlib.util
-for mod in ('noma', 'openai', 'flask', 'flask_cors', 'flask_caching', 'flask_cognito'):
+for mod in ('noma', 'openai', 'flask', 'flask_cors', 'flask_caching', 'flask_cognito',
+            'noma.runtime.process_env'):
     assert importlib.util.find_spec(mod), mod
+# env_config.py is the gitignored secrets file. Zappa exclude matches that
+# basename and would strip noma.runtime.env_config from the zip — do not
+# bring the module name back.
+assert importlib.util.find_spec('noma.runtime.env_config') is None, 'env_config'
 for mod in ('renglo', 'renglo' + '_api'):
     assert importlib.util.find_spec(mod) is None, mod
 from openai import OpenAI  # noqa: F401 — agent_utilities cold start
-from noma.runtime.app import create_app  # noqa: F401 — application.py cold start
-print('    CI packages import OK; platform packages absent')" || {
+from noma.runtime.app import create_app
+app = create_app(config={
+    'SECRET_KEY': 'ci-packaging-check',
+    'CACHE_TYPE': 'NullCache',
+    'COGNITO_REGION': 'us-east-1',
+    'COGNITO_USERPOOL_ID': 'us-east-1_ci',
+    'COGNITO_APP_CLIENT_ID': 'ci',
+    'COGNITO_CHECK_TOKEN_EXPIRATION': False,
+    'FE_BASE_URL': 'http://localhost:3000',
+})
+rv = app.test_client().get('/')
+assert rv.status_code == 200, rv.status
+print('    CI packages import OK; GET / 200; platform packages absent')" || {
     echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv (or renglo still present)" >&2
     exit 1
   }
@@ -616,6 +632,12 @@ stage = os.environ["STAGE"]
 # Rewriting them to their base name is what makes them do what they were
 # written to do. The original patterns are kept — harmless, and it keeps the
 # diff against the secret readable.
+#
+# The same basename match is why noma.runtime lives in process_env.py, not
+# env_config.py: staging exclude lists env_config.py so the gitignored
+# secrets file at the project root never ships. A Noma module with that
+# name was stripped from the zip while still importing cleanly in the
+# deploy venv (Step 8d). Do not put env_config.py back under noma/.
 patterns = ["boto3*", "botocore*", "s3transfer*"]
 
 with open(path, "r", encoding="utf-8") as fh:
@@ -668,6 +690,7 @@ echo "==> Step 11b: Lambda package size preflight"
 export DEPLOY_SITE
 PROJECT_ROOT="$SCRIPT_DIR"
 export PROJECT_ROOT
+export ZAPPA_SETTINGS_FILE STAGE
 LAMBDA_UNZIPPED_LIMIT=262144000
 export LAMBDA_UNZIPPED_LIMIT
 "$DEPLOY_PYTHON" - <<'PY'
@@ -723,6 +746,47 @@ print("    Largest packages:")
 for size, name in tops:
     tag = "  (excluded from zip)" if name.startswith(EXCLUDED_PREFIXES) else ""
     print(f"      {size / (1024 * 1024):8.1f} MB  {name}{tag}")
+
+# Zappa copies with shutil.ignore_patterns on BASE NAMES. A file that imports
+# here can still be absent from the zip (noma.runtime.env_config vs the
+# gitignored secrets file env_config.py). Fail before upload if exclude would
+# drop required Noma runtime modules.
+from fnmatch import fnmatch
+import json as _json
+
+noma_root = deploy_site / "noma"
+required_rel = (
+    "runtime/__init__.py",
+    "runtime/app.py",
+    "runtime/boot.py",
+    "runtime/process_env.py",
+)
+for rel in required_rel:
+    p = noma_root / rel
+    if not p.is_file():
+        raise SystemExit(f"ERROR: required noma/{rel} missing from deploy site-packages")
+
+exclude_patterns = []
+settings_path = os.environ.get("ZAPPA_SETTINGS_FILE", "")
+stage = os.environ.get("STAGE", "")
+if settings_path and os.path.exists(settings_path) and stage:
+    with open(settings_path, encoding="utf-8") as fh:
+        exclude_patterns = list((_json.load(fh).get(stage) or {}).get("exclude") or [])
+
+dropped = []
+for rel in required_rel:
+    for part in rel.split("/"):
+        for pattern in exclude_patterns:
+            if fnmatch(part, pattern):
+                dropped.append((f"noma/{rel}", pattern))
+                break
+if dropped:
+    raise SystemExit(
+        "ERROR: Zappa exclude matches Noma files by basename "
+        "(they will be omitted from the Lambda zip): "
+        + "; ".join(f"{rel} ~ {pat}" for rel, pat in dropped)
+    )
+print("    noma.runtime.process_env present; exclude does not strip required noma/runtime")
 
 # The zip is site-packages PLUS the project root. Measuring only the former is
 # what let a 182 MB site-packages pass while AWS rejected the upload: the build
