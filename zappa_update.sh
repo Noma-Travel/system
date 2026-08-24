@@ -466,11 +466,12 @@ if [[ -f "$REQ_CI_FILE" ]]; then
   fi
   echo "    Verifying CI package imports..."
   "$DEPLOY_PYTHON" -c "import importlib.util
-for mod in ('noma', 'openai'):
+for mod in ('noma', 'openai', 'flask', 'flask_cors', 'flask_caching', 'flask_cognito'):
     assert importlib.util.find_spec(mod), mod
 for mod in ('renglo', 'renglo' + '_api'):
     assert importlib.util.find_spec(mod) is None, mod
-from openai import OpenAI  # noqa: F401 — required at Lambda cold start via agent_utilities
+from openai import OpenAI  # noqa: F401 — agent_utilities cold start
+from noma.runtime.app import create_app  # noqa: F401 — application.py cold start
 print('    CI packages import OK; platform packages absent')" || {
     echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv (or renglo still present)" >&2
     exit 1

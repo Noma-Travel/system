@@ -1,9 +1,13 @@
 # CI/CD requirements - installs dependency packages from GitHub repos
 # Used by GitHub Actions workflow (local dev uses requirements.txt with local paths)
 
-# openai is a hard dep of noma.agent.utilities (and several handlers). Pin it
-# here so Step 8d (and Lambda cold start) can import it even when noma-mod's
-# wheel extras are stripped from the freeze file.
+# Process-factory extras that used to arrive via renglo-api. Pin them here so
+# Step 8d (and Lambda cold start of application.py) can import create_app
+# even when noma-mod's wheel extras are stripped from the freeze file.
 openai>=1.0
+Flask>=3.0
+flask-cors>=4.0
+flask-caching>=2.0
+flask-cognito>=1.21
 
 git+https://github.com/Noma-Travel/backend.git@main#egg=noma-mod&subdirectory=package
