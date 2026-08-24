@@ -47,10 +47,24 @@ def user_id_from_sub(sub: str) -> str:
 def bootstrap():
     system_dir = Path(__file__).resolve().parents[1]
     root = system_dir.parent
-    for rel in ("extensions/backend/package", "dev/renglo-api", "dev/renglo-lib", str(system_dir)):
+    # Product auth no longer imports renglo-lib (E′3).
+    for rel in ("extensions/backend/package", str(system_dir)):
         p = str(root / rel)
         if p not in sys.path:
             sys.path.insert(0, p)
+
+
+def _reset_noma_caches() -> None:
+    """Drop process singletons so staging then prod use the env just set."""
+    from noma.runtime import auth as noma_auth
+    from noma.store._dynamo import _reset_table_cache
+    from noma.utilities import runtime_cache
+
+    with runtime_cache._lock:
+        runtime_cache._cache.clear()
+    noma_auth._entity_table_cache = None
+    noma_auth._rel_table_cache = None
+    _reset_table_cache()
 
 
 def attendant_core_complete(attendant: dict, email: str) -> bool:
@@ -145,15 +159,12 @@ def verify_env(name: str, cfg: dict) -> list[str]:
     os.environ["DYNAMODB_REL_TABLE"] = cfg.get("rel_table", "")
     os.environ["COGNITO_USERPOOL_ID"] = cfg["pool"]
     bootstrap()
-    from renglo.auth.auth_controller import AuthController
-    from renglo.data.data_controller import DataController
-    from renglo.common import load_config
+    _reset_noma_caches()
+    from noma.runtime import auth as noma_auth
+    from noma.store import attendants as attendant_store
 
-    config = load_config()
-    auc = AuthController(config=config)
-    dac = DataController(config=config)
-    auc.set_invocation_user(user_id)
-    tree = auc.get_tree_full(user_id=user_id)
+    noma_auth.set_invocation_user(user_id)
+    tree = noma_auth.get_tree_full(user_id=user_id)
     doc = tree.get("document") or {}
 
     portfolio_ids, org_ids = extract_tree_ids(doc)
@@ -165,15 +176,13 @@ def verify_env(name: str, cfg: dict) -> list[str]:
     if cfg["org"] not in org_ids:
         issues.append(f"{name}: expected org {cfg['org']} not in tree {org_ids}")
 
-    # global_admin check
     groups = cognito.admin_list_groups_for_user(
         UserPoolId=cfg["pool"], Username=users[0]["Username"]
     ).get("Groups", [])
     if any(g.get("GroupName") == "global_admin" for g in groups):
         issues.append(f"{name}: user is in global_admin group — FAIL")
 
-    attendants = dac.get_a_b(cfg["portfolio"], cfg["org"], "noma_attendants", limit=1000)
-    items = attendants.get("items", []) if attendants.get("success") else []
+    items = attendant_store.all_in_org(cfg["portfolio"], cfg["org"])
     admin = next(
         (a for a in items if str(a.get("email") or "").strip().lower() == E2E_EMAIL),
         None,

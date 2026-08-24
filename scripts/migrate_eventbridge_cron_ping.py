@@ -3,11 +3,11 @@
 One-shot: re-point EventBridge HTTPS targets from POST/_schd/ping to POST/v1/cron/ping.
 
 Usage (staging credentials):
-  python system/scripts/migrate_eventbridge_cron_ping.py --dry-run
-  python system/scripts/migrate_eventbridge_cron_ping.py --apply
+  python system/scripts/migrate_eventbridge_cron_ping.py          # default = dry-run
+  python system/scripts/migrate_eventbridge_cron_ping.py --apply  # write PutTargets
 
 Requires AWS credentials with events:ListRules, events:ListTargetsByRule,
-events:PutTargets.
+events:PutTargets. Do not --apply prod rules in the same account without intent.
 """
 
 from __future__ import annotations

@@ -90,10 +90,9 @@ def user_id_from_sub(sub: str) -> str:
 def _bootstrap_paths() -> Path:
     system_dir = Path(__file__).resolve().parents[1]
     root = system_dir.parent
+    # Product auth no longer imports renglo-lib (E′3).
     for rel in (
         "extensions/backend/package",
-        "dev/renglo-api",
-        "dev/renglo-lib",
         str(system_dir),
     ):
         p = str(root / rel)
@@ -176,64 +175,71 @@ def ensure_cognito_user(
     return user
 
 
-def ensure_ddb_user(auc, user_id: str, email: str, first: str, last: str) -> None:
-    existing = auc.get_entity("user", user_id=user_id)
+def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
+    from noma.runtime import auth as noma_auth
+
+    existing = noma_auth.get_entity("user", user_id=user_id)
     if existing.get("success"):
         print(f"DynamoDB: user entity already exists (_id={user_id})")
         return
-    result = auc.create_user_funnel(user_id=user_id, email=email, name=first, slot_a=last)
+    result = noma_auth.create_user_funnel(user_id=user_id, email=email, name=first, slot_a=last)
     if not result.get("success"):
         raise RuntimeError(f"create_user_funnel failed: {result}")
     print(f"DynamoDB: created user entity (_id={user_id})")
 
 
-def find_existing_tenant(auc, user_id: str) -> tuple[str | None, str | None]:
-    resp = auc.AUM.list_entity("irn:entity:portfolio:*", limit=250)
-    portfolios = (resp or {}).get("document", {}).get("items", []) or []
+def find_existing_tenant(user_id: str) -> tuple[str | None, str | None]:
+    from noma.runtime import auth as noma_auth
+
+    portfolios = noma_auth.list_all_entities("irn:entity:portfolio:*")
     for portfolio in portfolios:
         if portfolio.get("name") != TENANT_NAME:
             continue
         portfolio_id = portfolio.get("_id")
         if not portfolio_id:
             continue
-        team_id = auc._pick_user_team_in_portfolio(user_id=user_id, portfolio_id=portfolio_id)
+        team_id = noma_auth.pick_user_team_in_portfolio(user_id=user_id, portfolio_id=portfolio_id)
         if not team_id:
             continue
         org_index = f"irn:entity:portfolio/org:{portfolio_id}/*"
-        org_resp = auc.AUM.list_entity(org_index, limit=50)
-        orgs = (org_resp or {}).get("document", {}).get("items", []) or []
+        orgs = noma_auth.list_all_entities(org_index)
         for org in orgs:
             if org.get("name") == TENANT_NAME and org.get("_id"):
                 return portfolio_id, org["_id"]
     return None, None
 
 
-def _post_a_b(dac, portfolio_id: str, org_id: str, ring: str, body: dict) -> dict:
-    result, status = dac.post_a_b(portfolio_id, org_id, ring, body)
-    if not isinstance(result, dict):
-        raise RuntimeError(f"post_a_b unexpected response: {result!r} status={status}")
-    if not result.get("success") and status not in (200, 201):
-        raise RuntimeError(f"post_a_b failed ({status}): {result}")
-    return result
+def _create_ring_doc(portfolio_id: str, org_id: str, ring: str, body: dict) -> dict:
+    from noma.store import StoreWriteError, for_ring
+
+    try:
+        created = for_ring(portfolio_id, org_id, ring).create(body)
+    except StoreWriteError as exc:
+        raise RuntimeError(f"store.create {ring} failed: {exc}") from exc
+    if not isinstance(created, dict) or not created.get("_id"):
+        raise RuntimeError(f"store.create {ring} returned no _id: {created!r}")
+    return created
 
 
-def ensure_org_onboarding(auc, dac, portfolio_id: str, org_id: str, user_id: str) -> None:
+def ensure_org_onboarding(portfolio_id: str, org_id: str, user_id: str) -> None:
     from noma.handlers.noma_onboardings import NomaOnboardings
+    from noma.runtime import auth as noma_auth
+    from noma.store import for_ring
 
-    tools = dac.get_a_b(portfolio_id, org_id, "schd_tools", limit=50)
-    tool_count = len(tools.get("items") or []) if tools.get("success") else 0
+    tools = for_ring(portfolio_id, org_id, "schd_tools").list_all()
+    tool_count = len(tools)
     if tool_count >= 40:
         print(f"Onboarding: {tool_count} schd_tools present — skipping tool install")
         return
     if tool_count:
         print(f"Onboarding: only {tool_count} schd_tools — running full tool install")
 
-    team_id = auc._pick_user_team_in_portfolio(user_id=user_id, portfolio_id=portfolio_id)
+    team_id = noma_auth.pick_user_team_in_portfolio(user_id=user_id, portfolio_id=portfolio_id)
     if not team_id:
         print("Onboarding: skipped — could not resolve team for portfolio")
         return
+    noma_auth.set_invocation_user(user_id)
     onboarding = NomaOnboardings()
-    onboarding.AUC.set_invocation_user(user_id)
     try:
         result = onboarding.run(
             {
@@ -252,21 +258,22 @@ def ensure_org_onboarding(auc, dac, portfolio_id: str, org_id: str, user_id: str
         print(f"Onboarding: warning — tool install may have failed: {result.get('message')}")
 
     try:
-        auc.set_invocation_user(user_id)
-        auc.refresh_tree()
+        noma_auth.set_invocation_user(user_id)
+        noma_auth.refresh_tree()
         print("Auth tree: refreshed for E2E user")
     except Exception as exc:
         print(f"Auth tree: warning — refresh failed (non-fatal): {exc}")
 
 
 def ensure_admin_attendant(
-    dac, auc, portfolio_id: str, org_id: str, user_id: str, email: str, first: str, last: str
+    portfolio_id: str, org_id: str, user_id: str, email: str, first: str, last: str
 ) -> None:
     from noma.handlers.bootstrap_org_admin import BootstrapOrgAdmin
+    from noma.runtime import auth as noma_auth
+    from noma.store import attendants as attendant_store
 
-    auc.set_invocation_user(user_id)
-    resp = dac.get_a_b(portfolio_id, org_id, "noma_attendants", limit=1000)
-    items = resp.get("items", []) if resp and resp.get("success") else []
+    noma_auth.set_invocation_user(user_id)
+    items = attendant_store.all_in_org(portfolio_id, org_id)
     admin_email = email.strip().lower()
     caller = next(
         (
@@ -277,14 +284,18 @@ def ensure_admin_attendant(
         None,
     )
     if caller is None:
-        body = {
-            "name": f"{first} {last}".strip(),
-            "email": email,
-            "user_id": user_id,
-            "status": "active",
-            "isActive": True,
-        }
-        created = _post_a_b(dac, portfolio_id, org_id, "noma_attendants", body)
+        _create_ring_doc(
+            portfolio_id,
+            org_id,
+            "noma_attendants",
+            {
+                "name": f"{first} {last}".strip(),
+                "email": email,
+                "user_id": user_id,
+                "status": "active",
+                "isActive": True,
+            },
+        )
         print(f"Attendants: created admin member record for {email}")
     else:
         print(f"Attendants: admin member record already exists for {email}")
@@ -326,9 +337,7 @@ def _attendant_core_complete(attendant: dict, email: str) -> bool:
     ).strip()
     if not gender:
         return False
-    country = str(
-        attendant.get("country") or attendant.get("pais") or ""
-    ).strip()
+    country = str(attendant.get("country") or attendant.get("pais") or "").strip()
     if not country:
         return False
     phone = str(
@@ -343,8 +352,6 @@ def _attendant_core_complete(attendant: dict, email: str) -> bool:
 
 
 def ensure_admin_attendant_core_profile(
-    dac,
-    auc,
     portfolio_id: str,
     org_id: str,
     user_id: str,
@@ -353,10 +360,11 @@ def ensure_admin_attendant_core_profile(
     last: str,
 ) -> None:
     from noma.handlers.complete_attendant import CompleteAttendant
+    from noma.runtime import auth as noma_auth
+    from noma.store import attendants as attendant_store
 
-    auc.set_invocation_user(user_id)
-    resp = dac.get_a_b(portfolio_id, org_id, "noma_attendants", limit=1000)
-    items = resp.get("items", []) if resp and resp.get("success") else []
+    noma_auth.set_invocation_user(user_id)
+    items = attendant_store.all_in_org(portfolio_id, org_id)
     attendant = _find_attendant_by_email(items, email)
     if attendant and _attendant_core_complete(attendant, email):
         print(f"Attendants: core profile already complete for {email}")
@@ -380,17 +388,17 @@ def ensure_admin_attendant_core_profile(
     print(f"Attendants: core profile completed for {email} (dashboard gates unlocked)")
 
 
-def ensure_chat_traveler(dac, portfolio_id: str, org_id: str, email: str) -> None:
-    resp = dac.get_a_b(portfolio_id, org_id, "noma_attendants", limit=1000)
-    items = resp.get("items", []) if resp and resp.get("success") else []
+def ensure_chat_traveler(portfolio_id: str, org_id: str, email: str) -> None:
+    from noma.store import attendants as attendant_store
+
+    items = attendant_store.all_in_org(portfolio_id, org_id)
     exists = any(
         CHAT_TRAVELER_NAME.lower() in str(a.get("name") or "").lower() for a in items
     )
     if exists:
         print(f'Attendants: "{CHAT_TRAVELER_NAME}" already exists — ok.')
         return
-    created = _post_a_b(
-        dac,
+    _create_ring_doc(
         portfolio_id,
         org_id,
         "noma_attendants",
@@ -402,8 +410,6 @@ def ensure_chat_traveler(dac, portfolio_id: str, org_id: str, email: str) -> Non
             "sendEmail": False,
         },
     )
-    if not created.get("success"):
-        raise RuntimeError(f'Failed to create chat traveler "{CHAT_TRAVELER_NAME}": {created}')
     print(f'Attendants: created chat traveler "{CHAT_TRAVELER_NAME}".')
 
 
@@ -447,7 +453,7 @@ def provision(
     apply_env_profile(profile)
     _bootstrap_paths()
 
-    from renglo_api import create_app
+    from noma.runtime import create_app
 
     app = create_app()
     with app.app_context():
@@ -471,11 +477,8 @@ def _provision_in_context(
     last: str,
     skip_chat_traveler: bool,
 ) -> int:
-    from renglo.auth.auth_controller import AuthController
-    from renglo.data.data_controller import DataController
-    from renglo.common import load_config
+    from noma.runtime import auth as noma_auth
 
-    config = load_config()
     session = boto3.Session(profile_name=PROFILE, region_name=REGION)
     cognito = session.client("cognito-idp")
     pool_id = profile["COGNITO_USERPOOL_ID"]
@@ -490,19 +493,17 @@ def _provision_in_context(
         return 1
 
     user_id = user_id_from_sub(sub)
-    auc = AuthController(config=config)
-    dac = DataController(config=config)
-    auc.set_invocation_user(user_id)
+    noma_auth.set_invocation_user(user_id)
 
-    ensure_ddb_user(auc, user_id, email, first, last)
+    ensure_ddb_user(user_id, email, first, last)
 
-    portfolio_id, org_id = find_existing_tenant(auc, user_id)
+    portfolio_id, org_id = find_existing_tenant(user_id)
     if portfolio_id and org_id:
         print(f"Tenant: reusing existing portfolio={portfolio_id} org={org_id}")
-        ensure_org_onboarding(auc, dac, portfolio_id, org_id, user_id)
+        ensure_org_onboarding(portfolio_id, org_id, user_id)
     else:
         print("Tenant: creating portfolio + org funnels...")
-        portfolio_resp = auc.create_portfolio_funnel(
+        portfolio_resp = noma_auth.create_portfolio_funnel(
             name=TENANT_NAME,
             about="Dedicated automated E2E tenant - do not use for customer data.",
             user_id=user_id,
@@ -512,7 +513,7 @@ def _provision_in_context(
         portfolio_id = portfolio_resp["document"][0]["document"]["_id"]
         print(f"Portfolio: created {portfolio_id}")
 
-        org_resp = auc.create_org_funnel(
+        org_resp = noma_auth.create_org_funnel(
             name=TENANT_NAME,
             portfolio_id=portfolio_id,
             user_id=user_id,
@@ -523,14 +524,14 @@ def _provision_in_context(
         if not org_id:
             raise RuntimeError(f"Could not resolve org id from funnel: {org_resp}")
         print(f"Org: created {org_id}")
-        ensure_org_onboarding(auc, dac, portfolio_id, org_id, user_id)
+        ensure_org_onboarding(portfolio_id, org_id, user_id)
 
-    ensure_admin_attendant(dac, auc, portfolio_id, org_id, user_id, email, first, last)
+    ensure_admin_attendant(portfolio_id, org_id, user_id, email, first, last)
     ensure_admin_attendant_core_profile(
-        dac, auc, portfolio_id, org_id, user_id, email, first, last
+        portfolio_id, org_id, user_id, email, first, last
     )
     if not skip_chat_traveler:
-        ensure_chat_traveler(dac, portfolio_id, org_id, email)
+        ensure_chat_traveler(portfolio_id, org_id, email)
 
     print_summary(env, profile, email, password, portfolio_id, org_id)
     return 0

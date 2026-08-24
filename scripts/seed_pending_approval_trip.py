@@ -13,8 +13,6 @@ Usage (from C:\\Noma\\system, with AWS_PROFILE=noma):
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
 import sys
 import uuid
@@ -32,8 +30,6 @@ system_dir = Path(__file__).resolve().parents[1]
 root = system_dir.parent
 for rel in (
     "extensions/backend/package",
-    "dev/renglo-api",
-    "dev/renglo-lib",
     str(system_dir),
 ):
     p = str(root / rel)
@@ -48,11 +44,11 @@ def _fields(item: dict) -> dict:
     return attrs if isinstance(attrs, dict) else item
 
 
-def find_attendant(DAC, portfolio: str, org: str, email: str) -> dict | None:
-    response = DAC.get_a_b(portfolio, org, "noma_attendants", limit=1000)
-    items = (response or {}).get("items") or []
+def find_attendant(portfolio: str, org: str, email: str) -> dict | None:
+    from noma.store import attendants as attendant_store
+
     wanted = email.strip().lower()
-    for row in items:
+    for row in attendant_store.all_in_org(portfolio, org):
         f = _fields(row)
         if str(f.get("email") or "").strip().lower() == wanted:
             return {**f, "_id": row.get("_id") or f.get("_id")}
@@ -134,14 +130,14 @@ def main() -> int:
     args = parser.parse_args()
 
     def _run() -> int:
-        from renglo.common import load_config
-        from renglo.data.data_controller import DataController
+        from noma.runtime.config import load_config
+        from noma.store import StoreWriteError, for_ring
         from noma.utilities.purchase_approval_email import notify_approvers_of_pending_purchase
 
         config = load_config()
-        DAC = DataController(config=config)
+        trips = for_ring(args.portfolio, args.org, "noma_travels")
 
-        attendant = find_attendant(DAC, args.portfolio, args.org, args.traveler_email)
+        attendant = find_attendant(args.portfolio, args.org, args.traveler_email)
         if not attendant:
             print(f"ERROR: no attendant for {args.traveler_email} in org {args.org}")
             return 1
@@ -153,21 +149,12 @@ def main() -> int:
 
         trip = build_trip(owner_user_id, attendant)
         trip_id = trip["_id"]
-        create_payload = {k: v for k, v in trip.items() if k != "_id"}
-        created = DAC.post_a_b(args.portfolio, args.org, "noma_travels", create_payload)
-        if isinstance(created, tuple):
-            created = created[0]
-        new_id = None
-        if isinstance(created, dict):
-            new_id = (
-                created.get("_id")
-                or (created.get("item") or {}).get("_id")
-                or (created.get("document") or {}).get("_id")
-            )
-            if not created.get("success") and not new_id:
-                print("ERROR creating trip:", json.dumps(created, default=str)[:800])
-                return 1
-
+        try:
+            created = trips.create(trip)
+        except StoreWriteError as exc:
+            print("ERROR creating trip:", exc)
+            return 1
+        new_id = created.get("_id") if isinstance(created, dict) else None
         if new_id and new_id != trip_id:
             trip_id = str(new_id)
             trip["_id"] = trip_id
@@ -188,11 +175,10 @@ def main() -> int:
             "startDate": trip["startDate"],
             "endDate": trip["endDate"],
         }
-        resp, status = DAC.put_a_b_c(
-            args.portfolio, args.org, "noma_travels", trip_id, put_body
-        )
-        if not resp.get("success") and status != 200:
-            print("ERROR updating trip approval fields:", resp)
+        try:
+            trips.update(trip_id, put_body)
+        except StoreWriteError as exc:
+            print("ERROR updating trip approval fields:", exc)
             return 1
 
         print("Created pending-approval trip:")
@@ -204,7 +190,7 @@ def main() -> int:
 
         if args.notify:
             mail = notify_approvers_of_pending_purchase(
-                config, DAC, args.portfolio, args.org, {**trip, **put_body}, trip_id
+                config, args.portfolio, args.org, {**trip, **put_body}, trip_id
             )
             print("Email notify:", mail)
 

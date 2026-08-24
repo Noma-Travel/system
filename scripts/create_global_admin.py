@@ -37,11 +37,12 @@ def user_id_from_sub(sub: str) -> str:
     return hashlib.md5(sub.encode("utf-8")).hexdigest()[:9]
 
 
-def _bootstrap_renglo():
+def _bootstrap_paths():
     system_dir = Path(__file__).resolve().parents[1]
     root = system_dir.parent
-    renglo_lib = root / "dev" / "renglo-lib"
-    for p in (str(renglo_lib), str(system_dir)):
+    # Product auth no longer imports renglo-lib (E′3).
+    for rel in ("extensions/backend/package", str(system_dir)):
+        p = str(root / rel)
         if p not in sys.path:
             sys.path.insert(0, p)
 
@@ -113,12 +114,13 @@ def add_to_admin_group(cognito, username: str) -> None:
 
 
 def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
-    _bootstrap_renglo()
-    from renglo.auth.auth_controller import AuthController
+    _bootstrap_paths()
+    from noma.runtime import auth as noma_auth
 
     # Prefer explicit env overrides (so staging/prod runs don't pick up a local env_config).
     entity_table = os.environ.get("DYNAMODB_ENTITY_TABLE") or ENTITY_TABLE
     rel_table = os.environ.get("DYNAMODB_REL_TABLE") or ""
+    ring_table = os.environ.get("DYNAMODB_RINGDATA_TABLE") or ""
     region = os.environ.get("COGNITO_REGION") or REGION
     pool = os.environ.get("COGNITO_USERPOOL_ID") or COGNITO_POOL
     try:
@@ -130,6 +132,9 @@ def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
         rel_table = os.environ.get("DYNAMODB_REL_TABLE") or getattr(
             ec, "DYNAMODB_REL_TABLE", rel_table
         )
+        ring_table = os.environ.get("DYNAMODB_RINGDATA_TABLE") or getattr(
+            ec, "DYNAMODB_RINGDATA_TABLE", ring_table
+        )
         region = os.environ.get("COGNITO_REGION") or getattr(ec, "COGNITO_REGION", region)
         pool = os.environ.get("COGNITO_USERPOOL_ID") or getattr(
             ec, "COGNITO_USERPOOL_ID", pool
@@ -137,19 +142,20 @@ def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
     except ImportError:
         pass
 
-    config = {
-        "DYNAMODB_ENTITY_TABLE": entity_table,
-        "DYNAMODB_REL_TABLE": rel_table,
-        "COGNITO_REGION": region,
-        "COGNITO_USERPOOL_ID": pool,
-    }
+    os.environ["DYNAMODB_ENTITY_TABLE"] = entity_table
+    if rel_table:
+        os.environ["DYNAMODB_REL_TABLE"] = rel_table
+    if ring_table:
+        os.environ["DYNAMODB_RINGDATA_TABLE"] = ring_table
+    os.environ["COGNITO_REGION"] = region
+    os.environ["COGNITO_USERPOOL_ID"] = pool
+
     print(f"DynamoDB: using table {entity_table}")
-    auc = AuthController(config=config)
-    existing = auc.get_entity("user", user_id=user_id)
+    existing = noma_auth.get_entity("user", user_id=user_id)
     if existing.get("success"):
         doc = existing.get("document") or {}
         if doc.get("slot_d") != "global_admin":
-            updated = auc.update_entity(
+            updated = noma_auth.update_entity(
                 "user",
                 user_id=user_id,
                 payload={"slot_d": "global_admin", "email": email or doc.get("email") or ""},
@@ -162,7 +168,7 @@ def ensure_ddb_user(user_id: str, email: str, first: str, last: str) -> None:
             print(f"DynamoDB: user entity already global_admin (_id={user_id})")
         return
 
-    result = auc.create_user_funnel(
+    result = noma_auth.create_user_funnel(
         user_id=user_id,
         email=email,
         name=first,
@@ -225,7 +231,7 @@ def main() -> int:
     print("Done. Next steps:")
     print(f"  1. Sign in to Console as {email}")
     print("  2. Sign out and back in if you promoted an existing account (refresh JWT groups)")
-    print(f"  3. Optional: GET /_auth/tree/refresh or delete S3 auth/tree/{user_id}")
+    print(f"  3. Optional: GET /v1/me/tree/refresh or delete S3 auth/tree/{user_id}")
     print(f"     app user_id: {user_id}")
     return 0
 
