@@ -10,8 +10,7 @@ SYS_ENV: noma_staging
 AGENT_LANGUAGE: en
 NOMA_ROLE_ENFORCEMENT: "on"
 NOMA_APPROVAL_ENFORCEMENT: "on"
-# Z1/Z2: Noma factory + dispatcher. Unset keeps renglo_api.create_app.
-# Production must not set this until staging Rextur smoke passes.
+# Legado; o boot ignora (Z8-A). Staging may still set "1"; that is a no-op.
 NOMA_OWN_APP: "1"
 # Z6 PR E: unmount app_chat after /v1/chat cutover (all nine Renglo blueprints).
 NOMA_UNMOUNT_BLUEPRINTS: "blueprint,search,state,session,docs,data,schd,auth,chat"

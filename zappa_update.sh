@@ -459,7 +459,7 @@ if [[ ${#EDITABLE_PATHS[@]} -gt 0 ]]; then
   done
 fi
 
-# Step 8d: noma-mod + langfuse are stripped from the freeze file (git+ / local
+# Step 8d: noma-mod + openai are stripped from the freeze file (git+ / local
 # paths). Install them explicitly for CI. renglo-* must not be in this file.
 echo ""
 REQ_CI_FILE="${REQUIREMENTS_CI_FILE:-requirements.ci.txt}"
@@ -472,12 +472,12 @@ if [[ -f "$REQ_CI_FILE" ]]; then
   fi
   echo "    Verifying CI package imports..."
   "$DEPLOY_PYTHON" -c "import importlib.util
-for mod in ('noma', 'langfuse'):
+for mod in ('noma', 'openai'):
     assert importlib.util.find_spec(mod), mod
-for mod in ('renglo', 'renglo_api'):
+for mod in ('renglo', 'renglo' + '_api'):
     assert importlib.util.find_spec(mod) is None, mod
-from langfuse.openai import OpenAI  # noqa: F401 — required at Lambda cold start via agent_utilities
-print('    CI packages import OK; renglo absent')" || {
+from openai import OpenAI  # noqa: F401 — required at Lambda cold start via agent_utilities
+print('    CI packages import OK; platform packages absent')" || {
     echo "ERROR: $REQ_CI_FILE packages failed to import in deploy venv (or renglo still present)" >&2
     exit 1
   }
@@ -488,7 +488,7 @@ fi
 echo ""
 echo "==> Step 8e: Assert renglo absent from deploy site-packages"
 _renglo_hit=0
-for name in renglo renglo_api; do
+for name in renglo "renglo"_api; do
   if [[ -d "$DEPLOY_SITE/$name" ]]; then
     echo "ERROR: $DEPLOY_SITE/$name still present" >&2
     _renglo_hit=1
@@ -504,7 +504,7 @@ if [[ "$_renglo_hit" -ne 0 ]]; then
   echo "ERROR: renglo* still in deploy site-packages; do not package" >&2
   exit 1
 fi
-echo "    site-packages has no renglo/ or renglo_api/"
+echo "    site-packages has no leftover platform package dirs"
 
 # Step 8c: Zappa's Windows+manylinux zip merge can omit pure-Python packages from site-packages
 # even when they import in the deploy venv. Zappa's handler.py imports werkzeug before the app

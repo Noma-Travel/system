@@ -1,8 +1,9 @@
 # CI/CD requirements for staging — installs dependency packages from @staging branches
 # Used by deploy-staging.yml (production uses requirements.ci.txt @main)
 
-# Explicit: noma.agent.utilities / _bootstrap_langfuse need langfuse in the
-# Lambda zip (Zappa --target layout).
-langfuse>=3.0,<5
+# openai is a hard dep of noma.agent.utilities (and several handlers). Pin it
+# here so Step 8d (and Lambda cold start) can import it even when noma-mod's
+# wheel extras are stripped from the freeze file.
+openai>=1.0
 
 git+https://github.com/Noma-Travel/backend.git@staging#egg=noma-mod&subdirectory=package

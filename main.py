@@ -125,7 +125,7 @@ def main():
     """
     
     logger.info("=" * 60)
-    logger.info("Starting Renglo System")
+    logger.info("Starting Noma System")
     logger.info("=" * 60)
     
     # Load env file first, then setup AWS credentials and region
@@ -159,7 +159,7 @@ def main():
     level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
     log_level = getattr(logging, level_name, logging.INFO)
     app.logger.setLevel(log_level)
-    logging.getLogger('renglo').setLevel(log_level)
+    logging.getLogger('noma').setLevel(log_level)
     
     # Run the Flask development server
     # For production, use a proper WSGI server like gunicorn

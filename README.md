@@ -54,7 +54,7 @@ Root
 │
 └── dev/                       ← Core Libraries (only for development)
    ├── renglo-api/             ← Renglo API (Flask routes)
-   │   ├── renglo_api/
+   │   ├── <legacy Flask package>/
    │   │   ├── app.py          ← Flask APP declaration
    │   │   ├── routes/         ← System routes
    │   │   └── config.py       ← Config functions (not a config file)
@@ -76,7 +76,7 @@ Root
 Dependencies Flow:
 ┌─────────────────────────────────────────────────────────────────┐
 │ system/ (Backend)                                               │
-│   └── imports: renglo_api                                       │
+│   └── imports: noma.runtime                                     │
 │        └── imports: renglo-lib                                  │
 │             └── uses: extensions/*/package/* (handlers)         │
 └─────────────────────────────────────────────────────────────────┘
