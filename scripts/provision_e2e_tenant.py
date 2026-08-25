@@ -222,7 +222,7 @@ def _create_ring_doc(portfolio_id: str, org_id: str, ring: str, body: dict) -> d
 
 
 def ensure_org_onboarding(portfolio_id: str, org_id: str, user_id: str) -> None:
-    from noma.handlers.noma_onboardings import NomaOnboardings
+    from noma.handlers.attendants.noma_onboardings import NomaOnboardings
     from noma.runtime import auth as noma_auth
     from noma.store import for_ring
 
@@ -268,7 +268,7 @@ def ensure_org_onboarding(portfolio_id: str, org_id: str, user_id: str) -> None:
 def ensure_admin_attendant(
     portfolio_id: str, org_id: str, user_id: str, email: str, first: str, last: str
 ) -> None:
-    from noma.handlers.bootstrap_org_admin import BootstrapOrgAdmin
+    from noma.handlers.attendants.bootstrap_org_admin import BootstrapOrgAdmin
     from noma.runtime import auth as noma_auth
     from noma.store import attendants as attendant_store
 
@@ -359,7 +359,7 @@ def ensure_admin_attendant_core_profile(
     first: str,
     last: str,
 ) -> None:
-    from noma.handlers.complete_attendant import CompleteAttendant
+    from noma.handlers.attendants.complete_attendant import CompleteAttendant
     from noma.runtime import auth as noma_auth
     from noma.store import attendants as attendant_store
 
