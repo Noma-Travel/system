@@ -10,8 +10,10 @@ Example usage:
 
 from noma.runtime.boot import create_app_for_process
 
-# Create application instance
-# Config will be loaded from env_config.py in this directory.
+# Zero env logic in this wrapper: config comes entirely from os.environ
+# (Zappa `environment_variables` in zappa_settings.json). env_config.py is
+# a local-dev-only file (see noma/__main__.py) and is never in the Lambda
+# zip -- zappa_update.sh excludes it by basename.
 # Process factory is noma.runtime.app.create_app (NOMA_OWN_APP is ignored).
 app = create_app_for_process()
 
